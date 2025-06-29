@@ -79,6 +79,10 @@
             color: white;
         }
 
+        .btn-secondary:first-child {
+            background: #17a2b8;
+        }
+
         .btn-danger {
             background: #dc3545;
             color: white;
@@ -273,6 +277,7 @@
                 </div>
             </div>
             <div class="header-actions">
+                <button class="btn btn-secondary" onclick="goToHome()">← Home</button>
                 <button class="btn btn-secondary" onclick="showCreateGroupModal()">Create Group</button>
                 <button class="btn btn-danger" onclick="logout()">Logout</button>
             </div>
@@ -539,6 +544,12 @@
                 alert('Failed to create group');
             }
         });
+
+        function goToHome() {
+            if (confirm('Are you sure you want to go back to the home page? You will be logged out.')) {
+                logout();
+            }
+        }
 
         async function logout() {
             if (confirm('Are you sure you want to logout?')) {

@@ -104,6 +104,20 @@
             transform: none;
         }
 
+        .btn.returning-user {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+        }
+
+        .welcome-back {
+            background: #d4edda;
+            color: #155724;
+            padding: 10px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            font-size: 14px;
+            border: 1px solid #c3e6cb;
+        }
+
         .error {
             color: #dc3545;
             margin-top: 10px;
@@ -166,6 +180,10 @@
                 Join Chat
             </button>
             
+            <div id="welcomeBack" class="welcome-back" style="display: none;">
+                Welcome back! Click continue to access your chats.
+            </div>
+            
             <div id="error" class="error"></div>
         </form>
 
@@ -200,31 +218,74 @@
             loginBtn.textContent = 'Joining...';
 
             try {
-                const response = await fetch('/api/register', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ username })
-                });
+                // First, try to get existing user by checking all users
+                const usersResponse = await fetch('/api/users');
+                const allUsers = await usersResponse.json();
+                
+                // Check if user already exists
+                const existingUser = allUsers.find(user => 
+                    user.username.toLowerCase() === username.toLowerCase()
+                );
 
-                const data = await response.json();
-
-                if (response.ok) {
-                    // Store user data in sessionStorage
-                    sessionStorage.setItem('userData', JSON.stringify(data));
+                let userData;
+                
+                if (existingUser) {
+                    // User exists, log them back in
+                    userData = {
+                        userId: existingUser.id,
+                        username: existingUser.username
+                    };
                     
-                    // Redirect to groups page
-                    window.location.href = './groups.html';
+                    // Update their online status
+                    try {
+                        await fetch('/api/user/online', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({ userId: existingUser.id })
+                        });
+                    } catch (error) {
+                        console.log('Could not update online status, but continuing...');
+                    }
+                    
+                    loginBtn.textContent = 'Welcome back!';
                 } else {
-                    errorDiv.textContent = data.error || 'Registration failed';
+                    // New user, register them
+                    const response = await fetch('/api/register', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ username })
+                    });
+
+                    userData = await response.json();
+
+                    if (!response.ok) {
+                        errorDiv.textContent = userData.error || 'Registration failed';
+                        return;
+                    }
+                    
+                    loginBtn.textContent = 'Account created!';
                 }
+
+                // Store user data in sessionStorage
+                sessionStorage.setItem('userData', JSON.stringify(userData));
+                
+                // Brief delay to show success message
+                setTimeout(() => {
+                    window.location.href = './groups.html';
+                }, 500);
+
             } catch (error) {
                 console.error('Error:', error);
                 errorDiv.textContent = 'Connection error. Please try again.';
             } finally {
-                loginBtn.disabled = false;
-                loginBtn.textContent = 'Join Chat';
+                if (loginBtn.textContent === 'Joining...') {
+                    loginBtn.disabled = false;
+                    loginBtn.textContent = 'Join Chat';
+                }
             }
         });
 
@@ -232,6 +293,40 @@
         window.addEventListener('load', function() {
             const userData = sessionStorage.getItem('userData');
             if (userData) {
+                const user = JSON.parse(userData);
+                
+                // Show welcome back interface
+                const loginBtn = document.getElementById('loginBtn');
+                const usernameInput = document.getElementById('username');
+                const welcomeBack = document.getElementById('welcomeBack');
+                
+                usernameInput.value = user.username;
+                usernameInput.disabled = true;
+                loginBtn.textContent = 'Continue as ' + user.username;
+                loginBtn.classList.add('returning-user');
+                welcomeBack.style.display = 'block';
+                
+                // Add option to start fresh
+                const startFreshBtn = document.createElement('button');
+                startFreshBtn.textContent = 'Start Fresh';
+                startFreshBtn.className = 'btn';
+                startFreshBtn.style.marginTop = '10px';
+                startFreshBtn.style.background = '#6c757d';
+                startFreshBtn.type = 'button';
+                startFreshBtn.onclick = function() {
+                    sessionStorage.removeItem('userData');
+                    location.reload();
+                };
+                
+                loginBtn.parentNode.insertBefore(startFreshBtn, welcomeBack);
+            }
+        });
+
+        // Handle "Continue as existing user" button click
+        document.getElementById('loginBtn').addEventListener('click', function(e) {
+            const userData = sessionStorage.getItem('userData');
+            if (userData && this.textContent.startsWith('Continue as')) {
+                e.preventDefault();
                 window.location.href = './groups.html';
             }
         });

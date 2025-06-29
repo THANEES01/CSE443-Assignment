@@ -17,7 +17,12 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: process.env.NODE_ENV === 'production' 
+    ? ['https://443realtimedchat-cse443-thanees01s-projects.vercel.app'] // Replace with your actual Vercel domain
+    : ['http://localhost:3001'],
+  credentials: true
+}));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -26,53 +31,47 @@ const pusher = new Pusher({
   appId: process.env.PUSHER_APP_ID,
   key: process.env.PUSHER_KEY,
   secret: process.env.PUSHER_SECRET,
-  cluster: process.env.PUSHER_CLUSTER,
+  cluster: process.env.PUSHER_CLUSTER || 'ap1',
   useTLS: true
 });
 
-// In-memory storage (use database in production)
+// In-memory storage (Note: This will reset on Vercel deployments)
+// For production, consider using a database like MongoDB, PostgreSQL, or Redis
 let users = new Map(); // userId -> user object
 let groups = new Map(); // groupId -> group object
 let messages = new Map(); // groupId -> messages array
 let polls = new Map(); // groupId -> polls array
 let messageViews = new Map(); // messageId -> [userId]
 
-// Routes
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+// Initialize with a default public group
+const defaultGroupId = 'default-group-001';
+groups.set(defaultGroupId, {
+  id: defaultGroupId,
+  name: 'General Chat',
+  createdBy: 'system',
+  createdAt: new Date(),
+  isPrivate: false,
+  members: [],
+  onlineMembers: []
 });
+messages.set(defaultGroupId, []);
+polls.set(defaultGroupId, []);
 
-app.get('/groups', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'groups.html'));
-});
-
-app.get('/chat/:groupId', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'chat.html'));
-});
-
-// Catch-all route for static files
-app.get('*', (req, res, next) => {
-  // If it's an API route, continue to next middleware
-  if (req.path.startsWith('/api/')) {
-    return next();
-  }
-  
-  // Try to serve static file
-  const filePath = path.join(__dirname, 'public', req.path);
-  res.sendFile(filePath, (err) => {
-    if (err) {
-      // If file not found, serve index.html for client-side routing
-      res.sendFile(path.join(__dirname, 'public', 'index.html'));
-    }
-  });
+// Health check for Vercel
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
 // User Management
 app.post('/api/register', (req, res) => {
   const { username } = req.body;
   
+  if (!username || username.trim().length === 0) {
+    return res.status(400).json({ error: 'Username is required' });
+  }
+  
   // Check if username already exists
-  const existingUser = Array.from(users.values()).find(user => user.username === username);
+  const existingUser = Array.from(users.values()).find(user => user.username.toLowerCase() === username.toLowerCase());
   if (existingUser) {
     return res.status(400).json({ error: 'Username already taken' });
   }
@@ -80,7 +79,7 @@ app.post('/api/register', (req, res) => {
   const userId = uuidv4();
   const user = {
     id: userId,
-    username,
+    username: username.trim(),
     online: true,
     joinedAt: new Date(),
     currentGroup: null
@@ -88,17 +87,34 @@ app.post('/api/register', (req, res) => {
   
   users.set(userId, user);
   
-  res.json({ userId, username });
+  res.json({ userId, username: user.username });
+});
+
+// Update user online status (for returning users)
+app.post('/api/user/online', (req, res) => {
+  const { userId } = req.body;
+  
+  const user = users.get(userId);
+  if (user) {
+    user.online = true;
+    res.json({ success: true, message: 'User is now online' });
+  } else {
+    res.status(404).json({ error: 'User not found' });
+  }
 });
 
 // Group Management
 app.post('/api/groups', (req, res) => {
   const { groupName, createdBy, isPrivate = false, members = [] } = req.body;
   
+  if (!groupName || groupName.trim().length === 0) {
+    return res.status(400).json({ error: 'Group name is required' });
+  }
+  
   const groupId = uuidv4();
   const group = {
     id: groupId,
-    name: groupName,
+    name: groupName.trim(),
     createdBy,
     createdAt: new Date(),
     isPrivate,
@@ -121,9 +137,9 @@ app.post('/api/groups', (req, res) => {
 app.get('/api/groups', (req, res) => {
   const { userId } = req.query;
   const publicGroups = Array.from(groups.values()).filter(group => !group.isPrivate);
-  const userPrivateGroups = Array.from(groups.values()).filter(group => 
+  const userPrivateGroups = userId ? Array.from(groups.values()).filter(group => 
     group.isPrivate && group.members.includes(userId)
-  );
+  ) : [];
   
   res.json([...publicGroups, ...userPrivateGroups]);
 });
@@ -208,6 +224,10 @@ app.post('/api/groups/:groupId/messages', (req, res) => {
   const { groupId } = req.params;
   const { userId, content } = req.body;
   
+  if (!content || content.trim().length === 0) {
+    return res.status(400).json({ error: 'Message content is required' });
+  }
+  
   const user = users.get(userId);
   const group = groups.get(groupId);
   
@@ -219,7 +239,7 @@ app.post('/api/groups/:groupId/messages', (req, res) => {
     id: uuidv4(),
     userId,
     username: user.username,
-    content,
+    content: content.trim(),
     groupId,
     timestamp: new Date(),
     type: 'message'
@@ -248,6 +268,14 @@ app.post('/api/groups/:groupId/polls', (req, res) => {
   const { groupId } = req.params;
   const { userId, question, options } = req.body;
   
+  if (!question || question.trim().length === 0) {
+    return res.status(400).json({ error: 'Poll question is required' });
+  }
+  
+  if (!options || options.length < 2) {
+    return res.status(400).json({ error: 'At least 2 options are required' });
+  }
+  
   const user = users.get(userId);
   const group = groups.get(groupId);
   
@@ -259,11 +287,11 @@ app.post('/api/groups/:groupId/polls', (req, res) => {
     id: uuidv4(),
     userId,
     username: user.username,
-    question,
+    question: question.trim(),
     groupId,
     options: options.map(option => ({
       id: uuidv4(),
-      text: option,
+      text: option.trim(),
       votes: [],
       count: 0
     })),
@@ -316,6 +344,10 @@ app.post('/api/messages/:messageId/view', (req, res) => {
   const { messageId } = req.params;
   const { userId } = req.body;
   
+  if (!messageId || !userId) {
+    return res.status(400).json({ error: 'Message ID and User ID are required' });
+  }
+  
   const viewers = messageViews.get(messageId) || [];
   
   if (!viewers.includes(userId)) {
@@ -334,6 +366,7 @@ app.post('/api/messages/:messageId/view', (req, res) => {
       .find(msg => msg.id === messageId);
     
     if (message) {
+      // Broadcast to all users in the group
       pusher.trigger(`group-${message.groupId}`, 'message-viewed', {
         messageId,
         viewCount: viewerDetails.length,
@@ -343,6 +376,23 @@ app.post('/api/messages/:messageId/view', (req, res) => {
   }
   
   res.json({ success: true });
+});
+
+// Get message views
+app.get('/api/messages/:messageId/views', (req, res) => {
+  const { messageId } = req.params;
+  const viewers = messageViews.get(messageId) || [];
+  
+  const viewerDetails = viewers
+    .map(id => users.get(id))
+    .filter(user => user)
+    .map(user => user.username);
+  
+  res.json({
+    messageId,
+    viewCount: viewerDetails.length,
+    viewers: viewerDetails
+  });
 });
 
 // Get all users (for group creation)
@@ -433,8 +483,14 @@ app.post('/api/groups/:groupId/add-member', (req, res) => {
   res.json({ success: true });
 });
 
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`📱 Open your chat app: http://localhost:${PORT}`);
-  console.log('Make sure to set your Pusher credentials in .env file');
-});
+// Export for Vercel
+export default app;
+
+// Only listen on port in development
+if (process.env.NODE_ENV !== 'production') {
+  app.listen(PORT, () => {
+    console.log(`🚀 Server running on port ${PORT}`);
+    console.log(`📱 Open your chat app: http://localhost:${PORT}`);
+    console.log('Make sure to set your Pusher credentials in .env file');
+  });
+}

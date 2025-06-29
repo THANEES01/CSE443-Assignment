@@ -31,10 +31,5 @@
       "src": "/(.*)",
       "dest": "/public/$1"
     }
-  ],
-  "functions": {
-    "index.js": {
-      "maxDuration": 10
-    }
-  }
+  ]
 }

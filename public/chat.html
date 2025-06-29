@@ -91,6 +91,10 @@
             color: white;
         }
 
+        .btn-secondary:first-child {
+            background: #17a2b8;
+        }
+
         .btn-danger {
             background: #dc3545;
             color: white;
@@ -426,6 +430,7 @@
             </div>
         </div>
         <div class="header-actions">
+            <button class="btn btn-secondary" onclick="goBack()">← Back to Groups</button>
             <button class="btn btn-secondary" onclick="toggleMembersSidebar()">Members</button>
             <button class="btn btn-danger" onclick="leaveGroup()">Leave Group</button>
         </div>
@@ -534,7 +539,10 @@
 
             channel.bind('new-message', function(data) {
                 displayMessage(data);
-                markMessageAsViewed(data.id);
+                // Mark new messages as viewed automatically
+                setTimeout(() => {
+                    markMessageAsViewed(data.id);
+                }, 1000);
             });
 
             channel.bind('new-poll', function(data) {
@@ -582,8 +590,31 @@
             
             messages.forEach(message => {
                 displayMessage(message);
-                markMessageAsViewed(message.id);
+                // Mark message as viewed after displaying
+                setTimeout(() => {
+                    markMessageAsViewed(message.id);
+                }, 100);
             });
+            
+            // Load existing view counts for all messages
+            setTimeout(() => {
+                loadMessageViews(messages);
+            }, 200);
+        }
+
+        // Load existing view counts for messages
+        async function loadMessageViews(messages) {
+            for (const message of messages) {
+                try {
+                    const response = await fetch(`/api/messages/${message.id}/views`);
+                    if (response.ok) {
+                        const viewData = await response.json();
+                        updateMessageViews(viewData);
+                    }
+                } catch (error) {
+                    console.error('Error loading message views:', error);
+                }
+            }
         }
 
         async function loadPolls() {
@@ -706,7 +737,13 @@
         function updateMessageViews(data) {
             const viewsElement = document.getElementById(`views-${data.messageId}`);
             if (viewsElement) {
-                viewsElement.innerHTML = `👁️ ${data.viewCount} views • ${data.viewers.join(', ')}`;
+                if (data.viewCount === 0) {
+                    viewsElement.innerHTML = `👁️ 0 views`;
+                } else if (data.viewCount === 1) {
+                    viewsElement.innerHTML = `👁️ 1 view • ${data.viewers.join(', ')}`;
+                } else {
+                    viewsElement.innerHTML = `👁️ ${data.viewCount} views • ${data.viewers.join(', ')}`;
+                }
             }
         }
 
@@ -854,6 +891,31 @@
             sidebar.style.display = sidebar.style.display === 'none' ? 'block' : 'none';
         }
 
+        function goBack() {
+            if (confirm('Are you sure you want to leave this group and go back?')) {
+                // Leave the group first
+                leaveGroupSilently().then(() => {
+                    window.location.href = './groups.html';
+                });
+            }
+        }
+
+        async function leaveGroupSilently() {
+            try {
+                await fetch(`/api/groups/${groupId}/leave`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        userId: currentUser.userId
+                    })
+                });
+            } catch (error) {
+                console.error('Error leaving group:', error);
+            }
+        }
+
         async function leaveGroup() {
             if (confirm('Are you sure you want to leave this group?')) {
                 try {
@@ -900,6 +962,13 @@
                 }
             }
         });
+
+        // Debug function - remove in production
+        function debugMessageViews() {
+            console.log('Current user:', currentUser);
+            console.log('All message elements:', document.querySelectorAll('.message'));
+            console.log('All view elements:', document.querySelectorAll('.message-views'));
+        }
 
         // Auto-scroll to bottom when new messages arrive
         const observer = new MutationObserver(function(mutations) {
