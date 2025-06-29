@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-time Chat - Login</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .login-container {
+            background: white;
+            padding: 40px;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            text-align: center;
+            max-width: 400px;
+            width: 90%;
+        }
+
+        .logo {
+            width: 80px;
+            height: 80px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 20px;
+            font-size: 32px;
+            color: white;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 24px;
+        }
+
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+
+        .input-group {
+            margin-bottom: 20px;
+            text-align: left;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: #333;
+            font-weight: 500;
+        }
+
+        input {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid #e9ecef;
+            border-radius: 10px;
+            outline: none;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+
+        input:focus {
+            border-color: #667eea;
+        }
+
+        .btn {
+            width: 100%;
+            padding: 15px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: transform 0.3s;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+        }
+
+        .btn:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .error {
+            color: #dc3545;
+            margin-top: 10px;
+            font-size: 14px;
+        }
+
+        .features {
+            margin-top: 30px;
+            text-align: left;
+            color: #666;
+            font-size: 14px;
+        }
+
+        .features h3 {
+            margin-bottom: 10px;
+            color: #333;
+        }
+
+        .features ul {
+            list-style: none;
+            padding-left: 0;
+        }
+
+        .features li {
+            margin-bottom: 5px;
+            padding-left: 20px;
+            position: relative;
+        }
+
+        .features li:before {
+            content: "✓";
+            position: absolute;
+            left: 0;
+            color: #28a745;
+            font-weight: bold;
+        }
+
+        @media (max-width: 600px) {
+            .login-container {
+                margin: 20px;
+                padding: 30px 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="logo">💬</div>
+        <h1>Real-time Chat</h1>
+        <p class="subtitle">Connect with friends and create amazing conversations</p>
+        
+        <form id="loginForm">
+            <div class="input-group">
+                <label for="username">Username</label>
+                <input type="text" id="username" name="username" required maxlength="20" 
+                       placeholder="Enter your username">
+            </div>
+            
+            <button type="submit" class="btn" id="loginBtn">
+                Join Chat
+            </button>
+            
+            <div id="error" class="error"></div>
+        </form>
+
+        <div class="features">
+            <h3>Features</h3>
+            <ul>
+                <li>Real-time messaging</li>
+                <li>Create and join groups</li>
+                <li>Interactive polls</li>
+                <li>Message view tracking</li>
+                <li>Online status</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('loginForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const username = document.getElementById('username').value.trim();
+            const errorDiv = document.getElementById('error');
+            const loginBtn = document.getElementById('loginBtn');
+            
+            if (!username) {
+                errorDiv.textContent = 'Please enter a username';
+                return;
+            }
+
+            // Clear previous errors
+            errorDiv.textContent = '';
+            loginBtn.disabled = true;
+            loginBtn.textContent = 'Joining...';
+
+            try {
+                const response = await fetch('/api/register', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ username })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    // Store user data in sessionStorage
+                    sessionStorage.setItem('userData', JSON.stringify(data));
+                    
+                    // Redirect to groups page
+                    window.location.href = '/groups';
+                } else {
+                    errorDiv.textContent = data.error || 'Registration failed';
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                errorDiv.textContent = 'Connection error. Please try again.';
+            } finally {
+                loginBtn.disabled = false;
+                loginBtn.textContent = 'Join Chat';
+            }
+        });
+
+        // Check if user is already logged in
+        window.addEventListener('load', function() {
+            const userData = sessionStorage.getItem('userData');
+            if (userData) {
+                window.location.href = '/groups';
+            }
+        });
+    </script>
+</body>
+</html>

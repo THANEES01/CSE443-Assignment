@@ -1,0 +1,33 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "index.js",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "/index.js"
+    },
+    {
+      "src": "/chat/(.*)",
+      "dest": "/public/chat.html"
+    },
+    {
+      "src": "/groups",
+      "dest": "/public/groups.html"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/public/$1"
+    }
+  ],
+  "env": {
+    "PUSHER_APP_ID": "@pusher_app_id",
+    "PUSHER_KEY": "@pusher_key", 
+    "PUSHER_SECRET": "@pusher_secret",
+    "PUSHER_CLUSTER": "@pusher_cluster"
+  }
+}

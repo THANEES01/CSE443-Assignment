@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat Groups</title>
+    <script src="https://js.pusher.com/8.2.0/pusher.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: white;
+            padding: 20px;
+            border-radius: 15px;
+            margin-bottom: 20px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .user-avatar {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-secondary {
+            background: #28a745;
+            color: white;
+        }
+
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            opacity: 0.9;
+        }
+
+        .groups-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .group-card {
+            background: white;
+            padding: 20px;
+            border-radius: 15px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            transition: transform 0.3s;
+            cursor: pointer;
+        }
+
+        .group-card:hover {
+            transform: translateY(-5px);
+        }
+
+        .group-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .group-name {
+            font-size: 18px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .group-type {
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .group-type.public {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .group-type.private {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .group-info {
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 15px;
+        }
+
+        .group-stats {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .member-count {
+            color: #667eea;
+            font-weight: bold;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+        }
+
+        .modal-content {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            max-width: 500px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .close {
+            font-size: 24px;
+            cursor: pointer;
+            color: #999;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            outline: none;
+        }
+
+        .form-group input:focus, .form-group select:focus {
+            border-color: #667eea;
+        }
+
+        .member-list {
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            padding: 10px;
+        }
+
+        .member-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 5px;
+            margin-bottom: 5px;
+        }
+
+        .member-item input[type="checkbox"] {
+            width: auto;
+        }
+
+        .no-groups {
+            text-align: center;
+            padding: 40px;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+
+        .no-groups-icon {
+            font-size: 48px;
+            margin-bottom: 20px;
+        }
+
+        @media (max-width: 768px) {
+            .groups-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .header {
+                flex-direction: column;
+                text-align: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="user-info">
+                <div class="user-avatar" id="userAvatar"></div>
+                <div>
+                    <h2 id="welcomeText">Welcome!</h2>
+                    <p style="color: #666; font-size: 14px;">Choose a group to start chatting</p>
+                </div>
+            </div>
+            <div class="header-actions">
+                <button class="btn btn-secondary" onclick="showCreateGroupModal()">Create Group</button>
+                <button class="btn btn-danger" onclick="logout()">Logout</button>
+            </div>
+        </div>
+
+        <div id="groupsContainer">
+            <div class="groups-grid" id="groupsGrid"></div>
+        </div>
+
+        <div class="no-groups" id="noGroups" style="display: none;">
+            <div class="no-groups-icon">🏠</div>
+            <h3>No groups yet</h3>
+            <p style="color: #666; margin-bottom: 20px;">Create your first group to start chatting!</p>
+            <button class="btn btn-primary" onclick="showCreateGroupModal()">Create Your First Group</button>
+        </div>
+    </div>
+
+    <!-- Create Group Modal -->
+    <div class="modal" id="createGroupModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Create New Group</h3>
+                <span class="close" onclick="closeCreateGroupModal()">&times;</span>
+            </div>
+            <form id="createGroupForm">
+                <div class="form-group">
+                    <label for="groupName">Group Name</label>
+                    <input type="text" id="groupName" name="groupName" required maxlength="50" placeholder="Enter group name">
+                </div>
+                
+                <div class="form-group">
+                    <label for="groupType">Group Type</label>
+                    <select id="groupType" name="groupType" onchange="toggleMemberSelection()">
+                        <option value="public">Public - Anyone can join</option>
+                        <option value="private">Private - Invite only</option>
+                    </select>
+                </div>
+                
+                <div class="form-group" id="memberSelection" style="display: none;">
+                    <label>Invite Members</label>
+                    <div class="member-list" id="memberList"></div>
+                </div>
+                
+                <button type="submit" class="btn btn-primary" style="width: 100%;">Create Group</button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        let currentUser = null;
+        let pusher = null;
+        let allUsers = [];
+
+        // Initialize
+        window.addEventListener('load', function() {
+            const userData = sessionStorage.getItem('userData');
+            if (!userData) {
+                window.location.href = '/';
+                return;
+            }
+
+            currentUser = JSON.parse(userData);
+            initializePage();
+            initializePusher();
+            loadGroups();
+            loadUsers();
+        });
+
+        function initializePage() {
+            document.getElementById('userAvatar').textContent = currentUser.username.charAt(0).toUpperCase();
+            document.getElementById('welcomeText').textContent = `Welcome, ${currentUser.username}!`;
+        }
+
+        function initializePusher() {
+            pusher = new Pusher('your_key_here', { // Replace with your actual Pusher key
+                cluster: 'ap1' // Replace with your actual cluster
+            });
+
+            const globalChannel = pusher.subscribe('global');
+            globalChannel.bind('new-group', function(data) {
+                if (!data.isPrivate) {
+                    loadGroups(); // Refresh groups when new public group is created
+                }
+            });
+
+            // Subscribe to user-specific channel for private group invitations
+            const userChannel = pusher.subscribe(`user-${currentUser.userId}`);
+            userChannel.bind('added-to-group', function(data) {
+                alert(`You've been added to the group "${data.group.name}" by ${data.addedBy}`);
+                loadGroups(); // Refresh groups
+            });
+        }
+
+        async function loadGroups() {
+            try {
+                const response = await fetch(`/api/groups?userId=${currentUser.userId}`);
+                const groups = await response.json();
+                
+                displayGroups(groups);
+            } catch (error) {
+                console.error('Error loading groups:', error);
+            }
+        }
+
+        async function loadUsers() {
+            try {
+                const response = await fetch('/api/users');
+                allUsers = await response.json();
+                updateMemberList();
+            } catch (error) {
+                console.error('Error loading users:', error);
+            }
+        }
+
+        function displayGroups(groups) {
+            const groupsGrid = document.getElementById('groupsGrid');
+            const noGroups = document.getElementById('noGroups');
+            
+            if (groups.length === 0) {
+                groupsGrid.innerHTML = '';
+                noGroups.style.display = 'block';
+                return;
+            }
+            
+            noGroups.style.display = 'none';
+            
+            groupsGrid.innerHTML = groups.map(group => `
+                <div class="group-card" onclick="joinGroup('${group.id}')">
+                    <div class="group-header">
+                        <div class="group-name">${group.name}</div>
+                        <div class="group-type ${group.isPrivate ? 'private' : 'public'}">
+                            ${group.isPrivate ? 'Private' : 'Public'}
+                        </div>
+                    </div>
+                    <div class="group-info">
+                        Created by ${getUsernameById(group.createdBy)} • ${formatDate(group.createdAt)}
+                    </div>
+                    <div class="group-stats">
+                        <div class="member-count">${group.members.length} members</div>
+                        <div style="color: #28a745;">${group.onlineMembers.length} online</div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function getUsernameById(userId) {
+            const user = allUsers.find(u => u.id === userId);
+            return user ? user.username : 'Unknown';
+        }
+
+        function formatDate(dateString) {
+            const date = new Date(dateString);
+            return date.toLocaleDateString();
+        }
+
+        async function joinGroup(groupId) {
+            try {
+                const response = await fetch(`/api/groups/${groupId}/join`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        userId: currentUser.userId
+                    })
+                });
+
+                if (response.ok) {
+                    window.location.href = `/chat/${groupId}`;
+                } else {
+                    const error = await response.json();
+                    alert(error.error || 'Failed to join group');
+                }
+            } catch (error) {
+                console.error('Error joining group:', error);
+                alert('Failed to join group');
+            }
+        }
+
+        function showCreateGroupModal() {
+            document.getElementById('createGroupModal').style.display = 'block';
+            loadUsers();
+        }
+
+        function closeCreateGroupModal() {
+            document.getElementById('createGroupModal').style.display = 'none';
+            document.getElementById('createGroupForm').reset();
+            toggleMemberSelection();
+        }
+
+        function toggleMemberSelection() {
+            const groupType = document.getElementById('groupType').value;
+            const memberSelection = document.getElementById('memberSelection');
+            
+            if (groupType === 'private') {
+                memberSelection.style.display = 'block';
+                updateMemberList();
+            } else {
+                memberSelection.style.display = 'none';
+            }
+        }
+
+        function updateMemberList() {
+            const memberList = document.getElementById('memberList');
+            const otherUsers = allUsers.filter(user => user.id !== currentUser.userId);
+            
+            memberList.innerHTML = otherUsers.map(user => `
+                <div class="member-item">
+                    <input type="checkbox" id="member-${user.id}" value="${user.id}">
+                    <label for="member-${user.id}">${user.username} ${user.online ? '🟢' : '🔴'}</label>
+                </div>
+            `).join('');
+        }
+
+        document.getElementById('createGroupForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const formData = new FormData(e.target);
+            const groupName = formData.get('groupName').trim();
+            const groupType = formData.get('groupType');
+            
+            if (!groupName) {
+                alert('Please enter a group name');
+                return;
+            }
+
+            const selectedMembers = [];
+            if (groupType === 'private') {
+                const checkboxes = document.querySelectorAll('#memberList input[type="checkbox"]:checked');
+                checkboxes.forEach(checkbox => {
+                    selectedMembers.push(checkbox.value);
+                });
+            }
+
+            try {
+                const response = await fetch('/api/groups', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        groupName,
+                        createdBy: currentUser.userId,
+                        isPrivate: groupType === 'private',
+                        members: selectedMembers
+                    })
+                });
+
+                if (response.ok) {
+                    const group = await response.json();
+                    closeCreateGroupModal();
+                    loadGroups();
+                    
+                    // Automatically join the created group
+                    setTimeout(() => {
+                        joinGroup(group.id);
+                    }, 500);
+                } else {
+                    const error = await response.json();
+                    alert(error.error || 'Failed to create group');
+                }
+            } catch (error) {
+                console.error('Error creating group:', error);
+                alert('Failed to create group');
+            }
+        });
+
+        async function logout() {
+            if (confirm('Are you sure you want to logout?')) {
+                try {
+                    await fetch('/api/logout', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            userId: currentUser.userId
+                        })
+                    });
+                } catch (error) {
+                    console.error('Error during logout:', error);
+                }
+                
+                sessionStorage.removeItem('userData');
+                window.location.href = '/';
+            }
+        }
+
+        // Close modal when clicking outside
+        window.addEventListener('click', function(e) {
+            const modal = document.getElementById('createGroupModal');
+            if (e.target === modal) {
+                closeCreateGroupModal();
+            }
+        });
+    </script>
+</body>
+</html>
