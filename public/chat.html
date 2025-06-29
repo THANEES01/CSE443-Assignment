@@ -488,7 +488,13 @@
             }
 
             currentUser = JSON.parse(userData);
-            groupId = window.location.pathname.split('/').pop();
+            groupId = window.location.hash.substring(1) || window.location.pathname.split('/').pop();
+            
+            if (!groupId || groupId === 'chat.html') {
+                alert('No group specified. Redirecting to groups page.');
+                window.location.href = './groups.html';
+                return;
+            }
             
             initializePage();
         });
@@ -861,7 +867,7 @@
                         })
                     });
 
-                    window.location.href = '/groups';
+                    window.location.href = './groups.html';
                 } catch (error) {
                     console.error('Error leaving group:', error);
                     alert('Failed to leave group');

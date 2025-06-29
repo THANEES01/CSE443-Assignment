@@ -42,12 +42,29 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+app.get('/groups', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'groups.html'));
+});
+
 app.get('/chat/:groupId', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'chat.html'));
 });
 
-app.get('/groups', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'groups.html'));
+// Catch-all route for static files
+app.get('*', (req, res, next) => {
+  // If it's an API route, continue to next middleware
+  if (req.path.startsWith('/api/')) {
+    return next();
+  }
+  
+  // Try to serve static file
+  const filePath = path.join(__dirname, 'public', req.path);
+  res.sendFile(filePath, (err) => {
+    if (err) {
+      // If file not found, serve index.html for client-side routing
+      res.sendFile(path.join(__dirname, 'public', 'index.html'));
+    }
+  });
 });
 
 // User Management

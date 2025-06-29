@@ -441,7 +441,7 @@
                 });
 
                 if (response.ok) {
-                    window.location.href = `/chat/${groupId}`;
+                    window.location.href = `./chat.html#${groupId}`;
                 } else {
                     const error = await response.json();
                     alert(error.error || 'Failed to join group');

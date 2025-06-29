@@ -215,7 +215,7 @@
                     sessionStorage.setItem('userData', JSON.stringify(data));
                     
                     // Redirect to groups page
-                    window.location.href = '/groups';
+                    window.location.href = './groups.html';
                 } else {
                     errorDiv.textContent = data.error || 'Registration failed';
                 }
@@ -232,7 +232,7 @@
         window.addEventListener('load', function() {
             const userData = sessionStorage.getItem('userData');
             if (userData) {
-                window.location.href = '/groups';
+                window.location.href = './groups.html';
             }
         });
     </script>
