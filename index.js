@@ -1,3 +1,4 @@
+// Import required dependencies
 import express from 'express';
 import cors from 'cors';
 import Pusher from 'pusher';
@@ -7,43 +8,46 @@ import { dirname } from 'path';
 import dotenv from 'dotenv';
 import path from 'path';
 
-// Load environment variables
+// Load environment variables from .env file
 dotenv.config();
 
+// Get current file path and directory (needed for ES modules)
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+// Initialize Express app and set port
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Middleware
+// Configure middleware
 app.use(cors({
+  // Set CORS origin based on environment - production uses Vercel domain, development uses localhost
   origin: process.env.NODE_ENV === 'production' 
     ? ['https://443realtimedchat-cse443-thanees01s-projects.vercel.app'] // Replace with your actual Vercel domain
     : ['http://localhost:3001'],
-  credentials: true
+  credentials: true // Allow credentials (cookies, authorization headers) to be sent
 }));
-app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.json()); // Parse JSON request bodies
+app.use(express.static(path.join(__dirname, 'public'))); // Serve static files from public directory
 
-// Initialize Pusher
+// Initialize Pusher for real-time communication
 const pusher = new Pusher({
   appId: process.env.PUSHER_APP_ID,
   key: process.env.PUSHER_KEY,
   secret: process.env.PUSHER_SECRET,
-  cluster: process.env.PUSHER_CLUSTER || 'ap1',
-  useTLS: true
+  cluster: process.env.PUSHER_CLUSTER || 'ap1', // Default to Asia Pacific cluster
+  useTLS: true // Use secure connections
 });
 
-// In-memory storage (Note: This will reset on Vercel deployments)
-// For production, consider using a database like MongoDB, PostgreSQL, or Redis
-let users = new Map(); // userId -> user object
-let groups = new Map(); // groupId -> group object
-let messages = new Map(); // groupId -> messages array
-let polls = new Map(); // groupId -> polls array
-let messageViews = new Map(); // messageId -> [userId]
+// In-memory data storage (Note: This will reset on Vercel deployments)
+// For production applications, consider using a persistent database like MongoDB, PostgreSQL, or Redis
+let users = new Map(); // Store user data: userId -> user object
+let groups = new Map(); // Store group data: groupId -> group object
+let messages = new Map(); // Store messages: groupId -> array of messages
+let polls = new Map(); // Store polls: groupId -> array of polls
+let messageViews = new Map(); // Track message views: messageId -> array of userIds who viewed
 
-// Initialize with a default public group
+// Initialize application with a default public group
 const defaultGroupId = 'default-group-001';
 groups.set(defaultGroupId, {
   id: defaultGroupId,
@@ -54,28 +58,34 @@ groups.set(defaultGroupId, {
   members: [],
   onlineMembers: []
 });
-messages.set(defaultGroupId, []);
-polls.set(defaultGroupId, []);
+messages.set(defaultGroupId, []); // Initialize empty messages array for default group
+polls.set(defaultGroupId, []); // Initialize empty polls array for default group
 
-// Health check for Vercel
+// Health check endpoint for Vercel deployment monitoring
 app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
-// User Management
+// ==================== USER MANAGEMENT ENDPOINTS ====================
+
+// User registration endpoint
 app.post('/api/register', (req, res) => {
   const { username } = req.body;
   
+  // Validate username input
   if (!username || username.trim().length === 0) {
     return res.status(400).json({ error: 'Username is required' });
   }
   
-  // Check if username already exists
-  const existingUser = Array.from(users.values()).find(user => user.username.toLowerCase() === username.toLowerCase());
+  // Check if username already exists (case-insensitive)
+  const existingUser = Array.from(users.values()).find(user => 
+    user.username.toLowerCase() === username.toLowerCase()
+  );
   if (existingUser) {
     return res.status(400).json({ error: 'Username already taken' });
   }
   
+  // Create new user object
   const userId = uuidv4();
   const user = {
     id: userId,
@@ -85,8 +95,10 @@ app.post('/api/register', (req, res) => {
     currentGroup: null
   };
   
+  // Store user in memory
   users.set(userId, user);
   
+  // Return user credentials
   res.json({ userId, username: user.username });
 });
 
@@ -103,14 +115,18 @@ app.post('/api/user/online', (req, res) => {
   }
 });
 
-// Group Management
+// ==================== GROUP MANAGEMENT ENDPOINTS ====================
+
+// Create a new group (public or private)
 app.post('/api/groups', (req, res) => {
   const { groupName, createdBy, isPrivate = false, members = [] } = req.body;
   
+  // Validate group name
   if (!groupName || groupName.trim().length === 0) {
     return res.status(400).json({ error: 'Group name is required' });
   }
   
+  // Create new group object
   const groupId = uuidv4();
   const group = {
     id: groupId,
@@ -118,15 +134,16 @@ app.post('/api/groups', (req, res) => {
     createdBy,
     createdAt: new Date(),
     isPrivate,
-    members: [createdBy, ...members],
+    members: [createdBy, ...members], // Creator is automatically added to members
     onlineMembers: []
   };
   
+  // Store group and initialize its messages and polls
   groups.set(groupId, group);
   messages.set(groupId, []);
   polls.set(groupId, []);
   
-  // Notify all users about new public group
+  // Notify all users about new public group via Pusher
   if (!isPrivate) {
     pusher.trigger('global', 'new-group', group);
   }
@@ -134,16 +151,23 @@ app.post('/api/groups', (req, res) => {
   res.json(group);
 });
 
+// Get all groups accessible to a user
 app.get('/api/groups', (req, res) => {
   const { userId } = req.query;
+  
+  // Get all public groups
   const publicGroups = Array.from(groups.values()).filter(group => !group.isPrivate);
+  
+  // Get private groups where user is a member
   const userPrivateGroups = userId ? Array.from(groups.values()).filter(group => 
     group.isPrivate && group.members.includes(userId)
   ) : [];
   
+  // Return combined list
   res.json([...publicGroups, ...userPrivateGroups]);
 });
 
+// Get specific group details
 app.get('/api/groups/:groupId', (req, res) => {
   const { groupId } = req.params;
   const group = groups.get(groupId);
@@ -155,7 +179,9 @@ app.get('/api/groups/:groupId', (req, res) => {
   res.json(group);
 });
 
-// Join/Leave Group
+// ==================== GROUP MEMBERSHIP ENDPOINTS ====================
+
+// User joins a group
 app.post('/api/groups/:groupId/join', (req, res) => {
   const { groupId } = req.params;
   const { userId } = req.body;
@@ -167,19 +193,20 @@ app.post('/api/groups/:groupId/join', (req, res) => {
     return res.status(404).json({ error: 'Group or user not found' });
   }
   
-  // Add user to group if not already a member
+  // Add user to group members if not already a member
   if (!group.members.includes(userId)) {
     group.members.push(userId);
   }
   
-  // Add to online members
+  // Add to online members list
   if (!group.onlineMembers.includes(userId)) {
     group.onlineMembers.push(userId);
   }
   
+  // Update user's current group
   user.currentGroup = groupId;
   
-  // Notify group members
+  // Notify other group members that user joined
   pusher.trigger(`group-${groupId}`, 'user-joined', {
     user: { id: user.id, username: user.username },
     onlineCount: group.onlineMembers.length
@@ -188,6 +215,7 @@ app.post('/api/groups/:groupId/join', (req, res) => {
   res.json({ success: true, group });
 });
 
+// User leaves a group
 app.post('/api/groups/:groupId/leave', (req, res) => {
   const { groupId } = req.params;
   const { userId } = req.body;
@@ -199,11 +227,11 @@ app.post('/api/groups/:groupId/leave', (req, res) => {
     return res.status(404).json({ error: 'Group or user not found' });
   }
   
-  // Remove from online members
+  // Remove user from online members
   group.onlineMembers = group.onlineMembers.filter(id => id !== userId);
   user.currentGroup = null;
   
-  // Notify group members
+  // Notify other group members that user left
   pusher.trigger(`group-${groupId}`, 'user-left', {
     userId,
     username: user.username,
@@ -213,17 +241,21 @@ app.post('/api/groups/:groupId/leave', (req, res) => {
   res.json({ success: true });
 });
 
-// Messages
+// ==================== MESSAGING ENDPOINTS ====================
+
+// Get all messages for a specific group
 app.get('/api/groups/:groupId/messages', (req, res) => {
   const { groupId } = req.params;
   const groupMessages = messages.get(groupId) || [];
   res.json(groupMessages);
 });
 
+// Send a new message to a group
 app.post('/api/groups/:groupId/messages', (req, res) => {
   const { groupId } = req.params;
   const { userId, content } = req.body;
   
+  // Validate message content
   if (!content || content.trim().length === 0) {
     return res.status(400).json({ error: 'Message content is required' });
   }
@@ -235,6 +267,7 @@ app.post('/api/groups/:groupId/messages', (req, res) => {
     return res.status(404).json({ error: 'User or group not found' });
   }
   
+  // Create message object
   const message = {
     id: uuidv4(),
     userId,
@@ -245,29 +278,35 @@ app.post('/api/groups/:groupId/messages', (req, res) => {
     type: 'message'
   };
   
+  // Store message in group's message history
   const groupMessages = messages.get(groupId) || [];
   groupMessages.push(message);
   messages.set(groupId, groupMessages);
   
+  // Initialize view tracking for this message
   messageViews.set(message.id, []);
   
-  // Broadcast to group
+  // Broadcast message to all group members via Pusher
   pusher.trigger(`group-${groupId}`, 'new-message', message);
   
   res.json(message);
 });
 
-// Polls
+// ==================== POLLING ENDPOINTS ====================
+
+// Get all polls for a specific group
 app.get('/api/groups/:groupId/polls', (req, res) => {
   const { groupId } = req.params;
   const groupPolls = polls.get(groupId) || [];
   res.json(groupPolls);
 });
 
+// Create a new poll in a group
 app.post('/api/groups/:groupId/polls', (req, res) => {
   const { groupId } = req.params;
   const { userId, question, options } = req.body;
   
+  // Validate poll input
   if (!question || question.trim().length === 0) {
     return res.status(400).json({ error: 'Poll question is required' });
   }
@@ -283,6 +322,7 @@ app.post('/api/groups/:groupId/polls', (req, res) => {
     return res.status(404).json({ error: 'User or group not found' });
   }
   
+  // Create poll object with options
   const poll = {
     id: uuidv4(),
     userId,
@@ -292,23 +332,25 @@ app.post('/api/groups/:groupId/polls', (req, res) => {
     options: options.map(option => ({
       id: uuidv4(),
       text: option.trim(),
-      votes: [],
+      votes: [], // Array of userIds who voted for this option
       count: 0
     })),
     timestamp: new Date(),
     type: 'poll'
   };
   
+  // Store poll in group's poll history
   const groupPolls = polls.get(groupId) || [];
   groupPolls.push(poll);
   polls.set(groupId, groupPolls);
   
-  // Broadcast to group
+  // Broadcast new poll to group members
   pusher.trigger(`group-${groupId}`, 'new-poll', poll);
   
   res.json(poll);
 });
 
+// Vote on a poll option
 app.post('/api/groups/:groupId/polls/:pollId/vote', (req, res) => {
   const { groupId, pollId } = req.params;
   const { userId, optionId } = req.body;
@@ -320,26 +362,28 @@ app.post('/api/groups/:groupId/polls/:pollId/vote', (req, res) => {
     return res.status(404).json({ error: 'Poll not found' });
   }
   
-  // Remove previous vote if exists
+  // Remove user's previous vote from all options (users can only vote once)
   poll.options.forEach(option => {
     option.votes = option.votes.filter(id => id !== userId);
     option.count = option.votes.length;
   });
   
-  // Add new vote
+  // Add new vote to selected option
   const selectedOption = poll.options.find(opt => opt.id === optionId);
   if (selectedOption) {
     selectedOption.votes.push(userId);
     selectedOption.count = selectedOption.votes.length;
   }
   
-  // Broadcast updated poll
+  // Broadcast updated poll results to all group members
   pusher.trigger(`group-${groupId}`, 'poll-updated', poll);
   
   res.json(poll);
 });
 
-// Message Views
+// ==================== MESSAGE VIEW TRACKING ENDPOINTS ====================
+
+// Mark a message as viewed by a user
 app.post('/api/messages/:messageId/view', (req, res) => {
   const { messageId } = req.params;
   const { userId } = req.body;
@@ -350,14 +394,15 @@ app.post('/api/messages/:messageId/view', (req, res) => {
   
   const viewers = messageViews.get(messageId) || [];
   
+  // Add user to viewers list if not already viewing
   if (!viewers.includes(userId)) {
     viewers.push(userId);
     messageViews.set(messageId, viewers);
     
-    // Get usernames for viewers
+    // Get usernames of all viewers
     const viewerDetails = viewers
       .map(id => users.get(id))
-      .filter(user => user)
+      .filter(user => user) // Remove null/undefined users
       .map(user => user.username);
     
     // Find which group this message belongs to
@@ -366,7 +411,7 @@ app.post('/api/messages/:messageId/view', (req, res) => {
       .find(msg => msg.id === messageId);
     
     if (message) {
-      // Broadcast to all users in the group
+      // Broadcast view update to all users in the group
       pusher.trigger(`group-${message.groupId}`, 'message-viewed', {
         messageId,
         viewCount: viewerDetails.length,
@@ -378,11 +423,12 @@ app.post('/api/messages/:messageId/view', (req, res) => {
   res.json({ success: true });
 });
 
-// Get message views
+// Get view information for a specific message
 app.get('/api/messages/:messageId/views', (req, res) => {
   const { messageId } = req.params;
   const viewers = messageViews.get(messageId) || [];
   
+  // Convert viewer IDs to usernames
   const viewerDetails = viewers
     .map(id => users.get(id))
     .filter(user => user)
@@ -395,7 +441,9 @@ app.get('/api/messages/:messageId/views', (req, res) => {
   });
 });
 
-// Get all users (for group creation)
+// ==================== UTILITY ENDPOINTS ====================
+
+// Get all users (useful for group creation and user management)
 app.get('/api/users', (req, res) => {
   const userList = Array.from(users.values()).map(user => ({
     id: user.id,
@@ -405,7 +453,7 @@ app.get('/api/users', (req, res) => {
   res.json(userList);
 });
 
-// Get group members
+// Get members of a specific group
 app.get('/api/groups/:groupId/members', (req, res) => {
   const { groupId } = req.params;
   const group = groups.get(groupId);
@@ -414,6 +462,7 @@ app.get('/api/groups/:groupId/members', (req, res) => {
     return res.status(404).json({ error: 'Group not found' });
   }
   
+  // Map member IDs to user objects with online status
   const members = group.members.map(memberId => {
     const user = users.get(memberId);
     return user ? {
@@ -421,21 +470,22 @@ app.get('/api/groups/:groupId/members', (req, res) => {
       username: user.username,
       online: group.onlineMembers.includes(memberId)
     } : null;
-  }).filter(Boolean);
+  }).filter(Boolean); // Remove null entries
   
   res.json(members);
 });
 
-// User logout
+// User logout endpoint
 app.post('/api/logout', (req, res) => {
   const { userId } = req.body;
   const user = users.get(userId);
   
   if (user) {
+    // Update user status
     user.online = false;
     user.currentGroup = null;
     
-    // Remove from all group online members
+    // Remove user from all group online member lists and notify groups
     groups.forEach(group => {
       if (group.onlineMembers.includes(userId)) {
         group.onlineMembers = group.onlineMembers.filter(id => id !== userId);
@@ -451,7 +501,7 @@ app.post('/api/logout', (req, res) => {
   res.json({ success: true });
 });
 
-// Add member to private group
+// Add member to private group (admin functionality)
 app.post('/api/groups/:groupId/add-member', (req, res) => {
   const { groupId } = req.params;
   const { userId, memberId } = req.body;
@@ -464,16 +514,16 @@ app.post('/api/groups/:groupId/add-member', (req, res) => {
     return res.status(404).json({ error: 'Group or user not found' });
   }
   
-  // Check if user is group creator or admin
+  // Check if user has permission to add members (only group creator)
   if (group.createdBy !== userId) {
     return res.status(403).json({ error: 'Only group creator can add members' });
   }
   
-  // Add member if not already in group
+  // Add member to group if not already a member
   if (!group.members.includes(memberId)) {
     group.members.push(memberId);
     
-    // Notify the new member
+    // Notify the new member about being added to the group
     pusher.trigger(`user-${memberId}`, 'added-to-group', {
       group,
       addedBy: user.username
@@ -483,10 +533,10 @@ app.post('/api/groups/:groupId/add-member', (req, res) => {
   res.json({ success: true });
 });
 
-// Export for Vercel
+// Export the Express app for Vercel serverless deployment
 export default app;
 
-// Only listen on port in development
+// Only start the server in development mode (not in Vercel production)
 if (process.env.NODE_ENV !== 'production') {
   app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);

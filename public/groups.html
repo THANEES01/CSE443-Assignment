@@ -327,258 +327,315 @@
     </div>
 
     <script>
-        let currentUser = null;
-        let pusher = null;
-        let allUsers = [];
+        // ==================== GLOBAL VARIABLES ====================
+let currentUser = null; // Store current logged-in user data
+let pusher = null; // Pusher instance for real-time communication
+let allUsers = []; // Cache of all users for group creation
 
-        // Initialize
-        window.addEventListener('load', function() {
-            const userData = sessionStorage.getItem('userData');
-            if (!userData) {
-                window.location.href = '/';
-                return;
-            }
+// ==================== PAGE INITIALIZATION ====================
+// Initialize the page when DOM is fully loaded
+window.addEventListener('load', function() {
+    // Check if user is logged in by looking for session data
+    const userData = sessionStorage.getItem('userData');
+    if (!userData) {
+        // No session found, redirect to login page
+        window.location.href = '/';
+        return;
+    }
 
-            currentUser = JSON.parse(userData);
-            initializePage();
-            initializePusher();
-            loadGroups();
-            loadUsers();
-        });
+    // Parse user data and initialize page components
+    currentUser = JSON.parse(userData);
+    initializePage(); // Set up UI with user info
+    initializePusher(); // Set up real-time communication
+    loadGroups(); // Fetch and display available groups
+    loadUsers(); // Fetch all users for group creation
+});
 
-        function initializePage() {
-            document.getElementById('userAvatar').textContent = currentUser.username.charAt(0).toUpperCase();
-            document.getElementById('welcomeText').textContent = `Welcome, ${currentUser.username}!`;
+// ==================== UI INITIALIZATION ====================
+// Set up the page UI with current user information
+function initializePage() {
+    // Display user's first letter as avatar
+    document.getElementById('userAvatar').textContent = currentUser.username.charAt(0).toUpperCase();
+    // Display personalized welcome message
+    document.getElementById('welcomeText').textContent = `Welcome, ${currentUser.username}!`;
+}
+
+// ==================== PUSHER REAL-TIME SETUP ====================
+// Initialize Pusher for real-time updates
+function initializePusher() {
+    // Initialize Pusher with app credentials
+    pusher = new Pusher('9971b0ddd233ce6a53b6', { // Replace with your actual Pusher key
+        cluster: 'ap1' // Replace with your actual cluster
+    });
+
+    // Subscribe to global channel for public group updates
+    const globalChannel = pusher.subscribe('global');
+    globalChannel.bind('new-group', function(data) {
+        // When a new public group is created, refresh the groups list
+        if (!data.isPrivate) {
+            loadGroups(); // Refresh groups when new public group is created
         }
+    });
 
-        function initializePusher() {
-            pusher = new Pusher('9971b0ddd233ce6a53b6', { // Replace with your actual Pusher key
-                cluster: 'ap1' // Replace with your actual cluster
-            });
+    // Subscribe to user-specific channel for private group invitations
+    const userChannel = pusher.subscribe(`user-${currentUser.userId}`);
+    userChannel.bind('added-to-group', function(data) {
+        // Notify user when they're added to a private group
+        alert(`You've been added to the group "${data.group.name}" by ${data.addedBy}`);
+        loadGroups(); // Refresh groups to show new group
+    });
+}
 
-            const globalChannel = pusher.subscribe('global');
-            globalChannel.bind('new-group', function(data) {
-                if (!data.isPrivate) {
-                    loadGroups(); // Refresh groups when new public group is created
-                }
-            });
+// ==================== DATA LOADING FUNCTIONS ====================
+// Fetch and display all groups accessible to the current user
+async function loadGroups() {
+    try {
+        // Fetch groups from API (includes both public and user's private groups)
+        const response = await fetch(`/api/groups?userId=${currentUser.userId}`);
+        const groups = await response.json();
+        
+        // Update UI with fetched groups
+        displayGroups(groups);
+    } catch (error) {
+        console.error('Error loading groups:', error);
+    }
+}
 
-            // Subscribe to user-specific channel for private group invitations
-            const userChannel = pusher.subscribe(`user-${currentUser.userId}`);
-            userChannel.bind('added-to-group', function(data) {
-                alert(`You've been added to the group "${data.group.name}" by ${data.addedBy}`);
-                loadGroups(); // Refresh groups
-            });
-        }
+// Fetch all users for group creation member selection
+async function loadUsers() {
+    try {
+        const response = await fetch('/api/users');
+        allUsers = await response.json(); // Cache users globally
+        updateMemberList(); // Update member selection UI
+    } catch (error) {
+        console.error('Error loading users:', error);
+    }
+}
 
-        async function loadGroups() {
-            try {
-                const response = await fetch(`/api/groups?userId=${currentUser.userId}`);
-                const groups = await response.json();
-                
-                displayGroups(groups);
-            } catch (error) {
-                console.error('Error loading groups:', error);
-            }
-        }
-
-        async function loadUsers() {
-            try {
-                const response = await fetch('/api/users');
-                allUsers = await response.json();
-                updateMemberList();
-            } catch (error) {
-                console.error('Error loading users:', error);
-            }
-        }
-
-        function displayGroups(groups) {
-            const groupsGrid = document.getElementById('groupsGrid');
-            const noGroups = document.getElementById('noGroups');
-            
-            if (groups.length === 0) {
-                groupsGrid.innerHTML = '';
-                noGroups.style.display = 'block';
-                return;
-            }
-            
-            noGroups.style.display = 'none';
-            
-            groupsGrid.innerHTML = groups.map(group => `
-                <div class="group-card" onclick="joinGroup('${group.id}')">
-                    <div class="group-header">
-                        <div class="group-name">${group.name}</div>
-                        <div class="group-type ${group.isPrivate ? 'private' : 'public'}">
-                            ${group.isPrivate ? 'Private' : 'Public'}
-                        </div>
-                    </div>
-                    <div class="group-info">
-                        Created by ${getUsernameById(group.createdBy)} • ${formatDate(group.createdAt)}
-                    </div>
-                    <div class="group-stats">
-                        <div class="member-count">${group.members.length} members</div>
-                        <div style="color: #28a745;">${group.onlineMembers.length} online</div>
-                    </div>
+// ==================== UI DISPLAY FUNCTIONS ====================
+// Display groups in the UI or show "no groups" message
+function displayGroups(groups) {
+    const groupsGrid = document.getElementById('groupsGrid');
+    const noGroups = document.getElementById('noGroups');
+    
+    // Show "no groups" message if user has no accessible groups
+    if (groups.length === 0) {
+        groupsGrid.innerHTML = '';
+        noGroups.style.display = 'block';
+        return;
+    }
+    
+    // Hide "no groups" message and display groups
+    noGroups.style.display = 'none';
+    
+    // Generate HTML for each group card
+    groupsGrid.innerHTML = groups.map(group => `
+        <div class="group-card" onclick="joinGroup('${group.id}')">
+            <div class="group-header">
+                <div class="group-name">${group.name}</div>
+                <div class="group-type ${group.isPrivate ? 'private' : 'public'}">
+                    ${group.isPrivate ? 'Private' : 'Public'}
                 </div>
-            `).join('');
-        }
+            </div>
+            <div class="group-info">
+                Created by ${getUsernameById(group.createdBy)} • ${formatDate(group.createdAt)}
+            </div>
+            <div class="group-stats">
+                <div class="member-count">${group.members.length} members</div>
+                <div style="color: #28a745;">${group.onlineMembers.length} online</div>
+            </div>
+        </div>
+    `).join('');
+}
 
-        function getUsernameById(userId) {
-            const user = allUsers.find(u => u.id === userId);
-            return user ? user.username : 'Unknown';
-        }
+// ==================== UTILITY FUNCTIONS ====================
+// Get username by user ID from cached users array
+function getUsernameById(userId) {
+    const user = allUsers.find(u => u.id === userId);
+    return user ? user.username : 'Unknown';
+}
 
-        function formatDate(dateString) {
-            const date = new Date(dateString);
-            return date.toLocaleDateString();
-        }
+// Format date string to readable format
+function formatDate(dateString) {
+    const date = new Date(dateString);
+    return date.toLocaleDateString();
+}
 
-        async function joinGroup(groupId) {
-            try {
-                const response = await fetch(`/api/groups/${groupId}/join`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        userId: currentUser.userId
-                    })
-                });
-
-                if (response.ok) {
-                    window.location.href = `./chat.html#${groupId}`;
-                } else {
-                    const error = await response.json();
-                    alert(error.error || 'Failed to join group');
-                }
-            } catch (error) {
-                console.error('Error joining group:', error);
-                alert('Failed to join group');
-            }
-        }
-
-        function showCreateGroupModal() {
-            document.getElementById('createGroupModal').style.display = 'block';
-            loadUsers();
-        }
-
-        function closeCreateGroupModal() {
-            document.getElementById('createGroupModal').style.display = 'none';
-            document.getElementById('createGroupForm').reset();
-            toggleMemberSelection();
-        }
-
-        function toggleMemberSelection() {
-            const groupType = document.getElementById('groupType').value;
-            const memberSelection = document.getElementById('memberSelection');
-            
-            if (groupType === 'private') {
-                memberSelection.style.display = 'block';
-                updateMemberList();
-            } else {
-                memberSelection.style.display = 'none';
-            }
-        }
-
-        function updateMemberList() {
-            const memberList = document.getElementById('memberList');
-            const otherUsers = allUsers.filter(user => user.id !== currentUser.userId);
-            
-            memberList.innerHTML = otherUsers.map(user => `
-                <div class="member-item">
-                    <input type="checkbox" id="member-${user.id}" value="${user.id}">
-                    <label for="member-${user.id}">${user.username} ${user.online ? '🟢' : '🔴'}</label>
-                </div>
-            `).join('');
-        }
-
-        document.getElementById('createGroupForm').addEventListener('submit', async function(e) {
-            e.preventDefault();
-            
-            const formData = new FormData(e.target);
-            const groupName = formData.get('groupName').trim();
-            const groupType = formData.get('groupType');
-            
-            if (!groupName) {
-                alert('Please enter a group name');
-                return;
-            }
-
-            const selectedMembers = [];
-            if (groupType === 'private') {
-                const checkboxes = document.querySelectorAll('#memberList input[type="checkbox"]:checked');
-                checkboxes.forEach(checkbox => {
-                    selectedMembers.push(checkbox.value);
-                });
-            }
-
-            try {
-                const response = await fetch('/api/groups', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        groupName,
-                        createdBy: currentUser.userId,
-                        isPrivate: groupType === 'private',
-                        members: selectedMembers
-                    })
-                });
-
-                if (response.ok) {
-                    const group = await response.json();
-                    closeCreateGroupModal();
-                    loadGroups();
-                    
-                    // Automatically join the created group
-                    setTimeout(() => {
-                        joinGroup(group.id);
-                    }, 500);
-                } else {
-                    const error = await response.json();
-                    alert(error.error || 'Failed to create group');
-                }
-            } catch (error) {
-                console.error('Error creating group:', error);
-                alert('Failed to create group');
-            }
+// ==================== GROUP INTERACTION FUNCTIONS ====================
+// Join a group and navigate to chat page
+async function joinGroup(groupId) {
+    try {
+        // Send join request to server
+        const response = await fetch(`/api/groups/${groupId}/join`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                userId: currentUser.userId
+            })
         });
 
-        function goToHome() {
-            if (confirm('Are you sure you want to go back to the home page? You will be logged out.')) {
-                logout();
-            }
+        if (response.ok) {
+            // Successfully joined, navigate to chat page with group ID
+            window.location.href = `./chat.html#${groupId}`;
+        } else {
+            // Handle join failure
+            const error = await response.json();
+            alert(error.error || 'Failed to join group');
         }
+    } catch (error) {
+        console.error('Error joining group:', error);
+        alert('Failed to join group');
+    }
+}
 
-        async function logout() {
-            if (confirm('Are you sure you want to logout?')) {
-                try {
-                    await fetch('/api/logout', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            userId: currentUser.userId
-                        })
-                    });
-                } catch (error) {
-                    console.error('Error during logout:', error);
-                }
-                
-                sessionStorage.removeItem('userData');
-                window.location.href = '/';
-            }
-        }
+// ==================== MODAL MANAGEMENT FUNCTIONS ====================
+// Show the create group modal
+function showCreateGroupModal() {
+    document.getElementById('createGroupModal').style.display = 'block';
+    loadUsers(); // Refresh user list for member selection
+}
 
-        // Close modal when clicking outside
-        window.addEventListener('click', function(e) {
-            const modal = document.getElementById('createGroupModal');
-            if (e.target === modal) {
-                closeCreateGroupModal();
-            }
+// Close the create group modal and reset form
+function closeCreateGroupModal() {
+    document.getElementById('createGroupModal').style.display = 'none';
+    document.getElementById('createGroupForm').reset(); // Clear form data
+    toggleMemberSelection(); // Reset member selection visibility
+}
+
+// Show/hide member selection based on group type (public/private)
+function toggleMemberSelection() {
+    const groupType = document.getElementById('groupType').value;
+    const memberSelection = document.getElementById('memberSelection');
+    
+    if (groupType === 'private') {
+        // Show member selection for private groups
+        memberSelection.style.display = 'block';
+        updateMemberList();
+    } else {
+        // Hide member selection for public groups
+        memberSelection.style.display = 'none';
+    }
+}
+
+// Update the member selection list with all users except current user
+function updateMemberList() {
+    const memberList = document.getElementById('memberList');
+    // Filter out current user from member selection
+    const otherUsers = allUsers.filter(user => user.id !== currentUser.userId);
+    
+    // Generate checkboxes for each user with online status indicator
+    memberList.innerHTML = otherUsers.map(user => `
+        <div class="member-item">
+            <input type="checkbox" id="member-${user.id}" value="${user.id}">
+            <label for="member-${user.id}">${user.username} ${user.online ? '🟢' : '🔴'}</label>
+        </div>
+    `).join('');
+}
+
+// ==================== GROUP CREATION FORM HANDLER ====================
+// Handle group creation form submission
+document.getElementById('createGroupForm').addEventListener('submit', async function(e) {
+    e.preventDefault(); // Prevent default form submission
+    
+    // Extract form data
+    const formData = new FormData(e.target);
+    const groupName = formData.get('groupName').trim();
+    const groupType = formData.get('groupType');
+    
+    // Validate group name
+    if (!groupName) {
+        alert('Please enter a group name');
+        return;
+    }
+
+    // Collect selected members for private groups
+    const selectedMembers = [];
+    if (groupType === 'private') {
+        const checkboxes = document.querySelectorAll('#memberList input[type="checkbox"]:checked');
+        checkboxes.forEach(checkbox => {
+            selectedMembers.push(checkbox.value);
         });
+    }
+
+    try {
+        // Send group creation request to server
+        const response = await fetch('/api/groups', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                groupName,
+                createdBy: currentUser.userId,
+                isPrivate: groupType === 'private',
+                members: selectedMembers
+            })
+        });
+
+        if (response.ok) {
+            // Group created successfully
+            const group = await response.json();
+            closeCreateGroupModal(); // Close modal
+            loadGroups(); // Refresh groups list
+            
+            // Automatically join the newly created group after brief delay
+            setTimeout(() => {
+                joinGroup(group.id);
+            }, 500);
+        } else {
+            // Handle creation failure
+            const error = await response.json();
+            alert(error.error || 'Failed to create group');
+        }
+    } catch (error) {
+        console.error('Error creating group:', error);
+        alert('Failed to create group');
+    }
+});
+
+// ==================== NAVIGATION FUNCTIONS ====================
+// Navigate back to home page (with logout confirmation)
+function goToHome() {
+    if (confirm('Are you sure you want to go back to the home page? You will be logged out.')) {
+        logout();
+    }
+}
+
+// Handle user logout
+async function logout() {
+    if (confirm('Are you sure you want to logout?')) {
+        try {
+            // Notify server about logout to update online status
+            await fetch('/api/logout', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    userId: currentUser.userId
+                })
+            });
+        } catch (error) {
+            // Continue with logout even if server request fails
+            console.error('Error during logout:', error);
+        }
+        
+        // Clear session data and redirect to login
+        sessionStorage.removeItem('userData');
+        window.location.href = '/';
+    }
+}
+
+// ==================== EVENT LISTENERS ====================
+// Close modal when clicking outside of it
+window.addEventListener('click', function(e) {
+    const modal = document.getElementById('createGroupModal');
+    if (e.target === modal) {
+        closeCreateGroupModal();
+    }
+});
     </script>
 </body>
 </html>

@@ -200,136 +200,166 @@
     </div>
 
     <script>
-        document.getElementById('loginForm').addEventListener('submit', async function(e) {
-            e.preventDefault();
+       // ==================== FORM SUBMISSION HANDLER ====================
+// Handle login form submission when user clicks "Join Chat" button
+document.getElementById('loginForm').addEventListener('submit', async function(e) {
+    e.preventDefault(); // Prevent default form submission (page reload)
+    
+    // Get form elements and user input
+    const username = document.getElementById('username').value.trim();
+    const errorDiv = document.getElementById('error');
+    const loginBtn = document.getElementById('loginBtn');
+    
+    // Validate username input
+    if (!username) {
+        errorDiv.textContent = 'Please enter a username';
+        return;
+    }
+
+    // Reset UI state for new login attempt
+    errorDiv.textContent = ''; // Clear any previous error messages
+    loginBtn.disabled = true; // Disable button to prevent multiple submissions
+    loginBtn.textContent = 'Joining...'; // Show loading state
+
+    try {
+        // ==================== CHECK FOR EXISTING USER ====================
+        // First, fetch all existing users to check if username already exists
+        const usersResponse = await fetch('/api/users');
+        const allUsers = await usersResponse.json();
+        
+        // Check if user already exists (case-insensitive comparison)
+        const existingUser = allUsers.find(user => 
+            user.username.toLowerCase() === username.toLowerCase()
+        );
+
+        let userData; // Will store user information for session
+        
+        if (existingUser) {
+            // ==================== EXISTING USER LOGIN ====================
+            // User already exists, log them back in without registering
+            userData = {
+                userId: existingUser.id,
+                username: existingUser.username
+            };
             
-            const username = document.getElementById('username').value.trim();
-            const errorDiv = document.getElementById('error');
-            const loginBtn = document.getElementById('loginBtn');
+            // Update their online status on the server
+            try {
+                await fetch('/api/user/online', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ userId: existingUser.id })
+                });
+            } catch (error) {
+                // If online status update fails, continue anyway (non-critical)
+                console.log('Could not update online status, but continuing...');
+            }
             
-            if (!username) {
-                errorDiv.textContent = 'Please enter a username';
+            loginBtn.textContent = 'Welcome back!';
+        } else {
+            // ==================== NEW USER REGISTRATION ====================
+            // New user, register them with the server
+            const response = await fetch('/api/register', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ username })
+            });
+
+            userData = await response.json();
+
+            // Check if registration was successful
+            if (!response.ok) {
+                errorDiv.textContent = userData.error || 'Registration failed';
                 return;
             }
+            
+            loginBtn.textContent = 'Account created!';
+        }
 
-            // Clear previous errors
-            errorDiv.textContent = '';
-            loginBtn.disabled = true;
-            loginBtn.textContent = 'Joining...';
+        // ==================== STORE USER SESSION ====================
+        // Store user data in browser's session storage for persistence
+        sessionStorage.setItem('userData', JSON.stringify(userData));
+        
+        // Brief delay to show success message, then redirect to main chat
+        setTimeout(() => {
+            window.location.href = './groups.html';
+        }, 500);
 
-            try {
-                // First, try to get existing user by checking all users
-                const usersResponse = await fetch('/api/users');
-                const allUsers = await usersResponse.json();
-                
-                // Check if user already exists
-                const existingUser = allUsers.find(user => 
-                    user.username.toLowerCase() === username.toLowerCase()
-                );
+    } catch (error) {
+        // ==================== ERROR HANDLING ====================
+        // Handle network errors or other unexpected issues
+        console.error('Error:', error);
+        errorDiv.textContent = 'Connection error. Please try again.';
+    } finally {
+        // ==================== CLEANUP UI STATE ====================
+        // Reset button state if it's still in loading state
+        if (loginBtn.textContent === 'Joining...') {
+            loginBtn.disabled = false;
+            loginBtn.textContent = 'Join Chat';
+        }
+    }
+});
 
-                let userData;
-                
-                if (existingUser) {
-                    // User exists, log them back in
-                    userData = {
-                        userId: existingUser.id,
-                        username: existingUser.username
-                    };
-                    
-                    // Update their online status
-                    try {
-                        await fetch('/api/user/online', {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json'
-                            },
-                            body: JSON.stringify({ userId: existingUser.id })
-                        });
-                    } catch (error) {
-                        console.log('Could not update online status, but continuing...');
-                    }
-                    
-                    loginBtn.textContent = 'Welcome back!';
-                } else {
-                    // New user, register them
-                    const response = await fetch('/api/register', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({ username })
-                    });
+// ==================== CHECK FOR EXISTING SESSION ====================
+// When page loads, check if user is already logged in from previous session
+window.addEventListener('load', function() {
+    const userData = sessionStorage.getItem('userData');
+    if (userData) {
+        // User has existing session data
+        const user = JSON.parse(userData);
+        
+        // Get UI elements for modification
+        const loginBtn = document.getElementById('loginBtn');
+        const usernameInput = document.getElementById('username');
+        const welcomeBack = document.getElementById('welcomeBack');
+        
+        // ==================== MODIFY UI FOR RETURNING USER ====================
+        // Pre-fill username and disable input (since user already exists)
+        usernameInput.value = user.username;
+        usernameInput.disabled = true;
+        
+        // Change button text and styling for returning user
+        loginBtn.textContent = 'Continue as ' + user.username;
+        loginBtn.classList.add('returning-user'); // Apply green styling
+        
+        // Show welcome back message
+        welcomeBack.style.display = 'block';
+        
+        // ==================== ADD "START FRESH" OPTION ====================
+        // Create button to allow user to clear session and start over
+        const startFreshBtn = document.createElement('button');
+        startFreshBtn.textContent = 'Start Fresh';
+        startFreshBtn.className = 'btn';
+        startFreshBtn.style.marginTop = '10px';
+        startFreshBtn.style.background = '#6c757d'; // Gray color
+        startFreshBtn.type = 'button'; // Prevent form submission
+        
+        // Handle "Start Fresh" button click
+        startFreshBtn.onclick = function() {
+            sessionStorage.removeItem('userData'); // Clear stored session
+            location.reload(); // Refresh page to reset UI
+        };
+        
+        // Insert the "Start Fresh" button before the welcome message
+        loginBtn.parentNode.insertBefore(startFreshBtn, welcomeBack);
+    }
+});
 
-                    userData = await response.json();
-
-                    if (!response.ok) {
-                        errorDiv.textContent = userData.error || 'Registration failed';
-                        return;
-                    }
-                    
-                    loginBtn.textContent = 'Account created!';
-                }
-
-                // Store user data in sessionStorage
-                sessionStorage.setItem('userData', JSON.stringify(userData));
-                
-                // Brief delay to show success message
-                setTimeout(() => {
-                    window.location.href = './groups.html';
-                }, 500);
-
-            } catch (error) {
-                console.error('Error:', error);
-                errorDiv.textContent = 'Connection error. Please try again.';
-            } finally {
-                if (loginBtn.textContent === 'Joining...') {
-                    loginBtn.disabled = false;
-                    loginBtn.textContent = 'Join Chat';
-                }
-            }
-        });
-
-        // Check if user is already logged in
-        window.addEventListener('load', function() {
-            const userData = sessionStorage.getItem('userData');
-            if (userData) {
-                const user = JSON.parse(userData);
-                
-                // Show welcome back interface
-                const loginBtn = document.getElementById('loginBtn');
-                const usernameInput = document.getElementById('username');
-                const welcomeBack = document.getElementById('welcomeBack');
-                
-                usernameInput.value = user.username;
-                usernameInput.disabled = true;
-                loginBtn.textContent = 'Continue as ' + user.username;
-                loginBtn.classList.add('returning-user');
-                welcomeBack.style.display = 'block';
-                
-                // Add option to start fresh
-                const startFreshBtn = document.createElement('button');
-                startFreshBtn.textContent = 'Start Fresh';
-                startFreshBtn.className = 'btn';
-                startFreshBtn.style.marginTop = '10px';
-                startFreshBtn.style.background = '#6c757d';
-                startFreshBtn.type = 'button';
-                startFreshBtn.onclick = function() {
-                    sessionStorage.removeItem('userData');
-                    location.reload();
-                };
-                
-                loginBtn.parentNode.insertBefore(startFreshBtn, welcomeBack);
-            }
-        });
-
-        // Handle "Continue as existing user" button click
-        document.getElementById('loginBtn').addEventListener('click', function(e) {
-            const userData = sessionStorage.getItem('userData');
-            if (userData && this.textContent.startsWith('Continue as')) {
-                e.preventDefault();
-                window.location.href = './groups.html';
-            }
-        });
+// ==================== HANDLE RETURNING USER BUTTON CLICK ====================
+// Special handler for when returning user clicks "Continue as [username]" button
+document.getElementById('loginBtn').addEventListener('click', function(e) {
+    const userData = sessionStorage.getItem('userData');
+    
+    // If user has existing session and button shows "Continue as...", skip form processing
+    if (userData && this.textContent.startsWith('Continue as')) {
+        e.preventDefault(); // Prevent form submission
+        window.location.href = './groups.html'; // Go directly to chat
+    }
+    // If no session data, normal form submission will handle login/registration
+});
     </script>
 </body>
 </html>

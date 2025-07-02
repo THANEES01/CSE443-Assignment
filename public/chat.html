@@ -478,98 +478,532 @@
     </div>
 
     <script>
-        let currentUser = null;
-        let currentGroup = null;
-        let groupId = null;
-        let pusher = null;
-        let channel = null;
+   // ==================== GLOBAL VARIABLES ====================
+let currentUser = null; // Store current logged-in user data
+let currentGroup = null; // Store current group information
+let groupId = null; // Current group ID from URL
+let pusher = null; // Pusher instance for real-time communication
+let channel = null; // Group-specific Pusher channel
 
-        // Initialize
-        window.addEventListener('load', function() {
-            const userData = sessionStorage.getItem('userData');
-            if (!userData) {
-                window.location.href = '/';
-                return;
-            }
+// ==================== PAGE INITIALIZATION ====================
+// Initialize the chat page when DOM is fully loaded
+window.addEventListener('load', function() {
+    // Check if user is logged in by looking for session data
+    const userData = sessionStorage.getItem('userData');
+    if (!userData) {
+        // No session found, redirect to login page
+        window.location.href = '/';
+        return;
+    }
 
-            currentUser = JSON.parse(userData);
-            groupId = window.location.hash.substring(1) || window.location.pathname.split('/').pop();
-            
-            if (!groupId || groupId === 'chat.html') {
-                alert('No group specified. Redirecting to groups page.');
-                window.location.href = './groups.html';
-                return;
+    // Parse user data from session
+    currentUser = JSON.parse(userData);
+    
+    // Extract group ID from URL hash (#groupId) or pathname
+    groupId = window.location.hash.substring(1) || window.location.pathname.split('/').pop();
+    
+    // Validate that a group ID was provided
+    if (!groupId || groupId === 'chat.html') {
+        alert('No group specified. Redirecting to groups page.');
+        window.location.href = './groups.html';
+        return;
+    }
+    
+    // Initialize all page components
+    initializePage();
+});
+
+// ==================== ASYNC PAGE SETUP ====================
+// Initialize all page components in sequence
+async function initializePage() {
+    try {
+        await loadGroupInfo(); // Load group details and update UI
+        initializePusher(); // Set up real-time communication
+        await joinGroup(); // Join the group on the server
+        await loadMessages(); // Load existing messages
+        await loadPolls(); // Load existing polls
+        await loadMembers(); // Load group members
+    } catch (error) {
+        // Handle any initialization errors
+        console.error('Error initializing page:', error);
+        alert('Failed to load group. Redirecting to groups page.');
+        window.location.href = '/groups';
+    }
+}
+
+// ==================== GROUP INFORMATION LOADING ====================
+// Load and display group information
+async function loadGroupInfo() {
+    const response = await fetch(`/api/groups/${groupId}`);
+    if (!response.ok) throw new Error('Group not found');
+    
+    // Store group data and update UI elements
+    currentGroup = await response.json();
+    
+    document.getElementById('groupName').textContent = currentGroup.name;
+    document.getElementById('groupAvatar').textContent = currentGroup.name.charAt(0).toUpperCase();
+    document.getElementById('memberCount').textContent = `${currentGroup.members.length} members`;
+}
+
+// ==================== PUSHER REAL-TIME SETUP ====================
+// Initialize Pusher for real-time group communication
+function initializePusher() {
+    // Initialize Pusher with app credentials
+    pusher = new Pusher('9971b0ddd233ce6a53b6', { // Replace with your actual Pusher key
+        cluster: 'ap1' // Replace with your actual cluster
+    });
+
+    // Subscribe to group-specific channel
+    channel = pusher.subscribe(`group-${groupId}`);
+
+    // ==================== PUSHER EVENT HANDLERS ====================
+    // Handle new messages in real-time
+    channel.bind('new-message', function(data) {
+        displayMessage(data); // Add message to UI
+        // Automatically mark new messages as viewed after short delay
+        setTimeout(() => {
+            markMessageAsViewed(data.id);
+        }, 1000);
+    });
+
+    // Handle new polls in real-time
+    channel.bind('new-poll', function(data) {
+        displayPoll(data); // Add poll to UI
+    });
+
+    // Handle poll vote updates in real-time
+    channel.bind('poll-updated', function(data) {
+        updatePollDisplay(data); // Update poll results
+    });
+
+    // Handle message view updates in real-time
+    channel.bind('message-viewed', function(data) {
+        updateMessageViews(data); // Update view counts
+    });
+
+    // Handle user joining the group
+    channel.bind('user-joined', function(data) {
+        updateOnlineCount(data.onlineCount); // Update online member count
+        loadMembers(); // Refresh member list
+    });
+
+    // Handle user leaving the group
+    channel.bind('user-left', function(data) {
+        updateOnlineCount(data.onlineCount); // Update online member count
+        loadMembers(); // Refresh member list
+    });
+}
+
+// ==================== GROUP MEMBERSHIP FUNCTIONS ====================
+// Join the current group on the server
+async function joinGroup() {
+    const response = await fetch(`/api/groups/${groupId}/join`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            userId: currentUser.userId
+        })
+    });
+
+    if (!response.ok) {
+        throw new Error('Failed to join group');
+    }
+}
+
+// ==================== MESSAGE LOADING AND DISPLAY ====================
+// Load existing messages when page loads
+async function loadMessages() {
+    const response = await fetch(`/api/groups/${groupId}/messages`);
+    const messages = await response.json();
+    
+    // Display each message and mark as viewed
+    messages.forEach(message => {
+        displayMessage(message);
+        // Mark message as viewed after displaying (short delay for DOM update)
+        setTimeout(() => {
+            markMessageAsViewed(message.id);
+        }, 100);
+    });
+    
+    // Load existing view counts for all messages
+    setTimeout(() => {
+        loadMessageViews(messages);
+    }, 200);
+}
+
+// Load existing view counts for messages
+async function loadMessageViews(messages) {
+    // Iterate through each message to fetch view data
+    for (const message of messages) {
+        try {
+            const response = await fetch(`/api/messages/${message.id}/views`);
+            if (response.ok) {
+                const viewData = await response.json();
+                updateMessageViews(viewData); // Update UI with view data
             }
-            
-            initializePage();
+        } catch (error) {
+            console.error('Error loading message views:', error);
+        }
+    }
+}
+
+// ==================== POLL LOADING ====================
+// Load existing polls when page loads
+async function loadPolls() {
+    const response = await fetch(`/api/groups/${groupId}/polls`);
+    const polls = await response.json();
+    
+    // Display each poll
+    polls.forEach(poll => displayPoll(poll));
+}
+
+// ==================== MEMBER MANAGEMENT ====================
+// Load and display group members
+async function loadMembers() {
+    const response = await fetch(`/api/groups/${groupId}/members`);
+    const members = await response.json();
+    
+    displayMembers(members); // Update members sidebar
+    updateOnlineCount(members.filter(m => m.online).length); // Update online count
+}
+
+// Display members in the sidebar
+function displayMembers(members) {
+    const membersList = document.getElementById('membersList');
+    
+    // Generate HTML for each member with avatar and online status
+    membersList.innerHTML = members.map(member => `
+        <div class="member-item">
+            <div class="member-avatar">${member.username.charAt(0).toUpperCase()}</div>
+            <div class="member-info">
+                <div class="member-name">${member.username}</div>
+                <div class="member-status">${member.online ? 'Online' : 'Offline'}</div>
+            </div>
+            <div class="${member.online ? 'online-dot' : 'offline-dot'}"></div>
+        </div>
+    `).join('');
+}
+
+// ==================== MESSAGE DISPLAY AND INTERACTION ====================
+// Display a new message in the chat
+function displayMessage(message) {
+    const messagesContainer = document.getElementById('chatMessages');
+    const messageElement = document.createElement('div');
+    messageElement.className = 'message';
+    messageElement.id = `message-${message.id}`;
+
+    // Create message HTML with header, content, and view tracking
+    messageElement.innerHTML = `
+        <div class="message-header">
+            <div class="username">
+                <div class="user-avatar">${message.username.charAt(0).toUpperCase()}</div>
+                ${message.username}
+            </div>
+            <span class="timestamp">${new Date(message.timestamp).toLocaleTimeString()}</span>
+        </div>
+        <div class="message-content">${message.content}</div>
+        <div class="message-views" id="views-${message.id}">
+            👁️ 0 views
+        </div>
+    `;
+
+    // Add message to container and auto-scroll to bottom
+    messagesContainer.appendChild(messageElement);
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+}
+
+// ==================== POLL DISPLAY AND INTERACTION ====================
+// Display a poll in the chat
+function displayPoll(poll) {
+    const messagesContainer = document.getElementById('chatMessages');
+    const pollElement = document.createElement('div');
+    pollElement.className = 'poll';
+    pollElement.id = `poll-${poll.id}`;
+
+    // Calculate total votes for percentage calculations
+    const totalVotes = poll.options.reduce((sum, option) => sum + option.count, 0);
+
+    // Generate HTML for each poll option with vote bars
+    let optionsHTML = poll.options.map(option => {
+        const percentage = totalVotes > 0 ? (option.count / totalVotes * 100).toFixed(1) : 0;
+        return `
+            <div class="poll-option" onclick="voteOnPoll('${poll.id}', '${option.id}')">
+                <div class="poll-option-bar" style="width: ${percentage}%"></div>
+                <div class="poll-option-text">
+                    <span>${option.text}</span>
+                    <span class="poll-option-count">${option.count}</span>
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    // Create complete poll HTML
+    pollElement.innerHTML = `
+        <div class="poll-header">
+            <div class="username">
+                <div class="user-avatar">${poll.username.charAt(0).toUpperCase()}</div>
+                ${poll.username}
+            </div>
+            <span class="timestamp">${new Date(poll.timestamp).toLocaleTimeString()}</span>
+        </div>
+        <div class="poll-question">${poll.question}</div>
+        <div class="poll-options-container">
+            ${optionsHTML}
+        </div>
+    `;
+
+    // Add poll to container and auto-scroll
+    messagesContainer.appendChild(pollElement);
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+}
+
+// Update poll display when votes change
+function updatePollDisplay(poll) {
+    const pollElement = document.getElementById(`poll-${poll.id}`);
+    if (!pollElement) return;
+
+    // Recalculate vote percentages
+    const totalVotes = poll.options.reduce((sum, option) => sum + option.count, 0);
+    const optionsContainer = pollElement.querySelector('.poll-options-container');
+
+    // Regenerate options HTML with updated vote counts and user's vote status
+    let optionsHTML = poll.options.map(option => {
+        const percentage = totalVotes > 0 ? (option.count / totalVotes * 100).toFixed(1) : 0;
+        const hasVoted = option.votes.includes(currentUser.userId); // Check if current user voted for this option
+        return `
+            <div class="poll-option ${hasVoted ? 'voted' : ''}" onclick="voteOnPoll('${poll.id}', '${option.id}')">
+                <div class="poll-option-bar" style="width: ${percentage}%"></div>
+                <div class="poll-option-text">
+                    <span>${option.text}</span>
+                    <span class="poll-option-count">${option.count}</span>
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    optionsContainer.innerHTML = optionsHTML;
+}
+
+// ==================== MESSAGE VIEW TRACKING ====================
+// Update message view display with current view count and viewer names
+function updateMessageViews(data) {
+    const viewsElement = document.getElementById(`views-${data.messageId}`);
+    if (viewsElement) {
+        if (data.viewCount === 0) {
+            viewsElement.innerHTML = `👁️ 0 views`;
+        } else if (data.viewCount === 1) {
+            viewsElement.innerHTML = `👁️ 1 view • ${data.viewers.join(', ')}`;
+        } else {
+            viewsElement.innerHTML = `👁️ ${data.viewCount} views • ${data.viewers.join(', ')}`;
+        }
+    }
+}
+
+// Update online member count in header
+function updateOnlineCount(count) {
+    document.getElementById('onlineCount').textContent = `${count} online`;
+}
+
+// ==================== MESSAGE SENDING ====================
+// Send a new text message
+async function sendMessage() {
+    const messageInput = document.getElementById('messageInput');
+    const content = messageInput.value.trim();
+    
+    if (!content) return; // Don't send empty messages
+
+    try {
+        // Send message to server via API
+        await fetch(`/api/groups/${groupId}/messages`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                userId: currentUser.userId,
+                content
+            })
         });
 
-        async function initializePage() {
-            try {
-                await loadGroupInfo();
-                initializePusher();
-                await joinGroup();
-                await loadMessages();
-                await loadPolls();
-                await loadMembers();
-            } catch (error) {
-                console.error('Error initializing page:', error);
-                alert('Failed to load group. Redirecting to groups page.');
-                window.location.href = '/groups';
-            }
-        }
+        // Clear input field after successful send
+        messageInput.value = '';
+    } catch (error) {
+        console.error('Error sending message:', error);
+    }
+}
 
-        async function loadGroupInfo() {
-            const response = await fetch(`/api/groups/${groupId}`);
-            if (!response.ok) throw new Error('Group not found');
-            
-            currentGroup = await response.json();
-            
-            document.getElementById('groupName').textContent = currentGroup.name;
-            document.getElementById('groupAvatar').textContent = currentGroup.name.charAt(0).toUpperCase();
-            document.getElementById('memberCount').textContent = `${currentGroup.members.length} members`;
-        }
+// ==================== POLL CREATION ====================
+// Create a new poll
+async function createPoll() {
+    const question = document.getElementById('pollQuestion').value.trim();
+    const optionInputs = document.querySelectorAll('.poll-option-text-input');
+    
+    // Extract non-empty options from input fields
+    const options = Array.from(optionInputs)
+        .map(input => input.value.trim())
+        .filter(option => option);
 
-        function initializePusher() {
-            pusher = new Pusher('9971b0ddd233ce6a53b6', { // Replace with your actual Pusher key
-                cluster: 'ap1' // Replace with your actual cluster
-            });
+    // Validate poll data
+    if (!question || options.length < 2) {
+        alert('Please enter a question and at least 2 options');
+        return;
+    }
 
-            channel = pusher.subscribe(`group-${groupId}`);
+    try {
+        // Send poll to server via API
+        await fetch(`/api/groups/${groupId}/polls`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                userId: currentUser.userId,
+                question,
+                options
+            })
+        });
 
-            channel.bind('new-message', function(data) {
-                displayMessage(data);
-                // Mark new messages as viewed automatically
-                setTimeout(() => {
-                    markMessageAsViewed(data.id);
-                }, 1000);
-            });
+        // Close poll creator after successful creation
+        cancelPoll();
+    } catch (error) {
+        console.error('Error creating poll:', error);
+    }
+}
 
-            channel.bind('new-poll', function(data) {
-                displayPoll(data);
-            });
+// ==================== POLL VOTING ====================
+// Vote on a poll option
+async function voteOnPoll(pollId, optionId) {
+    try {
+        // Send vote to server via API
+        await fetch(`/api/groups/${groupId}/polls/${pollId}/vote`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                userId: currentUser.userId,
+                optionId
+            })
+        });
+    } catch (error) {
+        console.error('Error voting:', error);
+    }
+}
 
-            channel.bind('poll-updated', function(data) {
-                updatePollDisplay(data);
-            });
+// ==================== MESSAGE VIEW TRACKING ====================
+// Mark a message as viewed by current user
+async function markMessageAsViewed(messageId) {
+    if (!currentUser) return;
 
-            channel.bind('message-viewed', function(data) {
-                updateMessageViews(data);
-            });
+    try {
+        // Send view tracking to server via API
+        await fetch(`/api/messages/${messageId}/view`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                userId: currentUser.userId
+            })
+        });
+    } catch (error) {
+        console.error('Error marking message as viewed:', error);
+    }
+}
 
-            channel.bind('user-joined', function(data) {
-                updateOnlineCount(data.onlineCount);
-                loadMembers();
-            });
+// ==================== POLL CREATOR UI FUNCTIONS ====================
+// Toggle poll creation interface visibility
+function togglePollCreator() {
+    const pollCreator = document.getElementById('pollCreator');
+    pollCreator.classList.toggle('active');
+}
 
-            channel.bind('user-left', function(data) {
-                updateOnlineCount(data.onlineCount);
-                loadMembers();
-            });
-        }
+// Cancel poll creation and reset form
+function cancelPoll() {
+    const pollCreator = document.getElementById('pollCreator');
+    pollCreator.classList.remove('active');
+    document.getElementById('pollQuestion').value = '';
+    
+    // Reset to default 2 options
+    const pollOptions = document.getElementById('pollOptions');
+    pollOptions.innerHTML = `
+        <div class="poll-option-input">
+            <input type="text" placeholder="Option 1" class="poll-option-text-input">
+            <button class="remove-option" onclick="removeOption(this)">Remove</button>
+        </div>
+        <div class="poll-option-input">
+            <input type="text" placeholder="Option 2" class="poll-option-text-input">
+            <button class="remove-option" onclick="removeOption(this)">Remove</button>
+        </div>
+    `;
+}
 
-        async function joinGroup() {
-            const response = await fetch(`/api/groups/${groupId}/join`, {
+// Add a new option to the poll creator
+function addPollOption() {
+    const pollOptions = document.getElementById('pollOptions');
+    const optionCount = pollOptions.children.length + 1;
+    
+    // Create new option input element
+    const optionDiv = document.createElement('div');
+    optionDiv.className = 'poll-option-input';
+    optionDiv.innerHTML = `
+        <input type="text" placeholder="Option ${optionCount}" class="poll-option-text-input">
+        <button class="remove-option" onclick="removeOption(this)">Remove</button>
+    `;
+    
+    pollOptions.appendChild(optionDiv);
+}
+
+// Remove a poll option (minimum 2 options required)
+function removeOption(button) {
+    const pollOptions = document.getElementById('pollOptions');
+    if (pollOptions.children.length > 2) {
+        button.parentElement.remove();
+    }
+}
+
+// ==================== UI CONTROLS ====================
+// Toggle members sidebar visibility
+function toggleMembersSidebar() {
+    const sidebar = document.getElementById('membersSidebar');
+    sidebar.style.display = sidebar.style.display === 'none' ? 'block' : 'none';
+}
+
+// ==================== NAVIGATION FUNCTIONS ====================
+// Go back to groups page with confirmation
+function goBack() {
+    if (confirm('Are you sure you want to leave this group and go back?')) {
+        // Leave the group first, then navigate
+        leaveGroupSilently().then(() => {
+            window.location.href = './groups.html';
+        });
+    }
+}
+
+// Leave group without user confirmation (internal use)
+async function leaveGroupSilently() {
+    try {
+        await fetch(`/api/groups/${groupId}/leave`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                userId: currentUser.userId
+            })
+        });
+    } catch (error) {
+        console.error('Error leaving group:', error);
+    }
+}
+
+// Leave group with user confirmation
+async function leaveGroup() {
+    if (confirm('Are you sure you want to leave this group?')) {
+        try {
+            await fetch(`/api/groups/${groupId}/leave`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -579,410 +1013,68 @@
                 })
             });
 
-            if (!response.ok) {
-                throw new Error('Failed to join group');
-            }
+            // Navigate back to groups page after successful leave
+            window.location.href = './groups.html';
+        } catch (error) {
+            console.error('Error leaving group:', error);
+            alert('Failed to leave group');
         }
+    }
+}
 
-        async function loadMessages() {
-            const response = await fetch(`/api/groups/${groupId}/messages`);
-            const messages = await response.json();
-            
-            messages.forEach(message => {
-                displayMessage(message);
-                // Mark message as viewed after displaying
-                setTimeout(() => {
-                    markMessageAsViewed(message.id);
-                }, 100);
+// ==================== EVENT LISTENERS ====================
+// Handle Enter key press in message input
+document.getElementById('messageInput').addEventListener('keypress', function(e) {
+    if (e.key === 'Enter') {
+        sendMessage();
+    }
+});
+
+// Handle page unload - cleanup by leaving group
+window.addEventListener('beforeunload', async function() {
+    if (currentUser && groupId) {
+        try {
+            // Leave group when user closes/refreshes page
+            await fetch(`/api/groups/${groupId}/leave`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    userId: currentUser.userId
+                })
             });
-            
-            // Load existing view counts for all messages
-            setTimeout(() => {
-                loadMessageViews(messages);
-            }, 200);
+        } catch (error) {
+            console.error('Error during cleanup:', error);
         }
+    }
+});
 
-        // Load existing view counts for messages
-        async function loadMessageViews(messages) {
-            for (const message of messages) {
-                try {
-                    const response = await fetch(`/api/messages/${message.id}/views`);
-                    if (response.ok) {
-                        const viewData = await response.json();
-                        updateMessageViews(viewData);
-                    }
-                } catch (error) {
-                    console.error('Error loading message views:', error);
-                }
-            }
-        }
+// ==================== DEBUG FUNCTIONS ====================
+// Debug function for development - remove in production
+function debugMessageViews() {
+    console.log('Current user:', currentUser);
+    console.log('All message elements:', document.querySelectorAll('.message'));
+    console.log('All view elements:', document.querySelectorAll('.message-views'));
+}
 
-        async function loadPolls() {
-            const response = await fetch(`/api/groups/${groupId}/polls`);
-            const polls = await response.json();
-            
-            polls.forEach(poll => displayPoll(poll));
-        }
-
-        async function loadMembers() {
-            const response = await fetch(`/api/groups/${groupId}/members`);
-            const members = await response.json();
-            
-            displayMembers(members);
-            updateOnlineCount(members.filter(m => m.online).length);
-        }
-
-        function displayMembers(members) {
-            const membersList = document.getElementById('membersList');
-            
-            membersList.innerHTML = members.map(member => `
-                <div class="member-item">
-                    <div class="member-avatar">${member.username.charAt(0).toUpperCase()}</div>
-                    <div class="member-info">
-                        <div class="member-name">${member.username}</div>
-                        <div class="member-status">${member.online ? 'Online' : 'Offline'}</div>
-                    </div>
-                    <div class="${member.online ? 'online-dot' : 'offline-dot'}"></div>
-                </div>
-            `).join('');
-        }
-
-        function displayMessage(message) {
+// ==================== AUTO-SCROLL FUNCTIONALITY ====================
+// Auto-scroll to bottom when new messages arrive using MutationObserver
+const observer = new MutationObserver(function(mutations) {
+    mutations.forEach(function(mutation) {
+        // Check if new elements were added to the chat
+        if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
             const messagesContainer = document.getElementById('chatMessages');
-            const messageElement = document.createElement('div');
-            messageElement.className = 'message';
-            messageElement.id = `message-${message.id}`;
-
-            messageElement.innerHTML = `
-                <div class="message-header">
-                    <div class="username">
-                        <div class="user-avatar">${message.username.charAt(0).toUpperCase()}</div>
-                        ${message.username}
-                    </div>
-                    <span class="timestamp">${new Date(message.timestamp).toLocaleTimeString()}</span>
-                </div>
-                <div class="message-content">${message.content}</div>
-                <div class="message-views" id="views-${message.id}">
-                    👁️ 0 views
-                </div>
-            `;
-
-            messagesContainer.appendChild(messageElement);
+            // Scroll to bottom to show new messages
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
         }
+    });
+});
 
-        function displayPoll(poll) {
-            const messagesContainer = document.getElementById('chatMessages');
-            const pollElement = document.createElement('div');
-            pollElement.className = 'poll';
-            pollElement.id = `poll-${poll.id}`;
-
-            const totalVotes = poll.options.reduce((sum, option) => sum + option.count, 0);
-
-            let optionsHTML = poll.options.map(option => {
-                const percentage = totalVotes > 0 ? (option.count / totalVotes * 100).toFixed(1) : 0;
-                return `
-                    <div class="poll-option" onclick="voteOnPoll('${poll.id}', '${option.id}')">
-                        <div class="poll-option-bar" style="width: ${percentage}%"></div>
-                        <div class="poll-option-text">
-                            <span>${option.text}</span>
-                            <span class="poll-option-count">${option.count}</span>
-                        </div>
-                    </div>
-                `;
-            }).join('');
-
-            pollElement.innerHTML = `
-                <div class="poll-header">
-                    <div class="username">
-                        <div class="user-avatar">${poll.username.charAt(0).toUpperCase()}</div>
-                        ${poll.username}
-                    </div>
-                    <span class="timestamp">${new Date(poll.timestamp).toLocaleTimeString()}</span>
-                </div>
-                <div class="poll-question">${poll.question}</div>
-                <div class="poll-options-container">
-                    ${optionsHTML}
-                </div>
-            `;
-
-            messagesContainer.appendChild(pollElement);
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
-        }
-
-        function updatePollDisplay(poll) {
-            const pollElement = document.getElementById(`poll-${poll.id}`);
-            if (!pollElement) return;
-
-            const totalVotes = poll.options.reduce((sum, option) => sum + option.count, 0);
-            const optionsContainer = pollElement.querySelector('.poll-options-container');
-
-            let optionsHTML = poll.options.map(option => {
-                const percentage = totalVotes > 0 ? (option.count / totalVotes * 100).toFixed(1) : 0;
-                const hasVoted = option.votes.includes(currentUser.userId);
-                return `
-                    <div class="poll-option ${hasVoted ? 'voted' : ''}" onclick="voteOnPoll('${poll.id}', '${option.id}')">
-                        <div class="poll-option-bar" style="width: ${percentage}%"></div>
-                        <div class="poll-option-text">
-                            <span>${option.text}</span>
-                            <span class="poll-option-count">${option.count}</span>
-                        </div>
-                    </div>
-                `;
-            }).join('');
-
-            optionsContainer.innerHTML = optionsHTML;
-        }
-
-        function updateMessageViews(data) {
-            const viewsElement = document.getElementById(`views-${data.messageId}`);
-            if (viewsElement) {
-                if (data.viewCount === 0) {
-                    viewsElement.innerHTML = `👁️ 0 views`;
-                } else if (data.viewCount === 1) {
-                    viewsElement.innerHTML = `👁️ 1 view • ${data.viewers.join(', ')}`;
-                } else {
-                    viewsElement.innerHTML = `👁️ ${data.viewCount} views • ${data.viewers.join(', ')}`;
-                }
-            }
-        }
-
-        function updateOnlineCount(count) {
-            document.getElementById('onlineCount').textContent = `${count} online`;
-        }
-
-        async function sendMessage() {
-            const messageInput = document.getElementById('messageInput');
-            const content = messageInput.value.trim();
-            
-            if (!content) return;
-
-            try {
-                await fetch(`/api/groups/${groupId}/messages`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        userId: currentUser.userId,
-                        content
-                    })
-                });
-
-                messageInput.value = '';
-            } catch (error) {
-                console.error('Error sending message:', error);
-            }
-        }
-
-        async function createPoll() {
-            const question = document.getElementById('pollQuestion').value.trim();
-            const optionInputs = document.querySelectorAll('.poll-option-text-input');
-            const options = Array.from(optionInputs)
-                .map(input => input.value.trim())
-                .filter(option => option);
-
-            if (!question || options.length < 2) {
-                alert('Please enter a question and at least 2 options');
-                return;
-            }
-
-            try {
-                await fetch(`/api/groups/${groupId}/polls`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        userId: currentUser.userId,
-                        question,
-                        options
-                    })
-                });
-
-                cancelPoll();
-            } catch (error) {
-                console.error('Error creating poll:', error);
-            }
-        }
-
-        async function voteOnPoll(pollId, optionId) {
-            try {
-                await fetch(`/api/groups/${groupId}/polls/${pollId}/vote`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        userId: currentUser.userId,
-                        optionId
-                    })
-                });
-            } catch (error) {
-                console.error('Error voting:', error);
-            }
-        }
-
-        async function markMessageAsViewed(messageId) {
-            if (!currentUser) return;
-
-            try {
-                await fetch(`/api/messages/${messageId}/view`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        userId: currentUser.userId
-                    })
-                });
-            } catch (error) {
-                console.error('Error marking message as viewed:', error);
-            }
-        }
-
-        function togglePollCreator() {
-            const pollCreator = document.getElementById('pollCreator');
-            pollCreator.classList.toggle('active');
-        }
-
-        function cancelPoll() {
-            const pollCreator = document.getElementById('pollCreator');
-            pollCreator.classList.remove('active');
-            document.getElementById('pollQuestion').value = '';
-            
-            // Reset to 2 options
-            const pollOptions = document.getElementById('pollOptions');
-            pollOptions.innerHTML = `
-                <div class="poll-option-input">
-                    <input type="text" placeholder="Option 1" class="poll-option-text-input">
-                    <button class="remove-option" onclick="removeOption(this)">Remove</button>
-                </div>
-                <div class="poll-option-input">
-                    <input type="text" placeholder="Option 2" class="poll-option-text-input">
-                    <button class="remove-option" onclick="removeOption(this)">Remove</button>
-                </div>
-            `;
-        }
-
-        function addPollOption() {
-            const pollOptions = document.getElementById('pollOptions');
-            const optionCount = pollOptions.children.length + 1;
-            
-            const optionDiv = document.createElement('div');
-            optionDiv.className = 'poll-option-input';
-            optionDiv.innerHTML = `
-                <input type="text" placeholder="Option ${optionCount}" class="poll-option-text-input">
-                <button class="remove-option" onclick="removeOption(this)">Remove</button>
-            `;
-            
-            pollOptions.appendChild(optionDiv);
-        }
-
-        function removeOption(button) {
-            const pollOptions = document.getElementById('pollOptions');
-            if (pollOptions.children.length > 2) {
-                button.parentElement.remove();
-            }
-        }
-
-        function toggleMembersSidebar() {
-            const sidebar = document.getElementById('membersSidebar');
-            sidebar.style.display = sidebar.style.display === 'none' ? 'block' : 'none';
-        }
-
-        function goBack() {
-            if (confirm('Are you sure you want to leave this group and go back?')) {
-                // Leave the group first
-                leaveGroupSilently().then(() => {
-                    window.location.href = './groups.html';
-                });
-            }
-        }
-
-        async function leaveGroupSilently() {
-            try {
-                await fetch(`/api/groups/${groupId}/leave`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        userId: currentUser.userId
-                    })
-                });
-            } catch (error) {
-                console.error('Error leaving group:', error);
-            }
-        }
-
-        async function leaveGroup() {
-            if (confirm('Are you sure you want to leave this group?')) {
-                try {
-                    await fetch(`/api/groups/${groupId}/leave`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            userId: currentUser.userId
-                        })
-                    });
-
-                    window.location.href = './groups.html';
-                } catch (error) {
-                    console.error('Error leaving group:', error);
-                    alert('Failed to leave group');
-                }
-            }
-        }
-
-        // Event listeners
-        document.getElementById('messageInput').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                sendMessage();
-            }
-        });
-
-        // Handle page unload
-        window.addEventListener('beforeunload', async function() {
-            if (currentUser && groupId) {
-                try {
-                    await fetch(`/api/groups/${groupId}/leave`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            userId: currentUser.userId
-                        })
-                    });
-                } catch (error) {
-                    console.error('Error during cleanup:', error);
-                }
-            }
-        });
-
-        // Debug function - remove in production
-        function debugMessageViews() {
-            console.log('Current user:', currentUser);
-            console.log('All message elements:', document.querySelectorAll('.message'));
-            console.log('All view elements:', document.querySelectorAll('.message-views'));
-        }
-
-        // Auto-scroll to bottom when new messages arrive
-        const observer = new MutationObserver(function(mutations) {
-            mutations.forEach(function(mutation) {
-                if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
-                    const messagesContainer = document.getElementById('chatMessages');
-                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
-                }
-            });
-        });
-
-        observer.observe(document.getElementById('chatMessages'), {
-            childList: true
-        });
+// Start observing the chat messages container for new messages
+observer.observe(document.getElementById('chatMessages'), {
+    childList: true // Watch for added/removed child elements
+});
     </script>
 </body>
 </html>
